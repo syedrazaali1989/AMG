@@ -49,7 +49,7 @@ export function Navbar() {
                     <Link href="/" className="flex items-center gap-2 group">
                         <img
                             src="/logo.png"
-                            alt="AMGI Trading - Professional Trading Signals"
+                            alt="AMG Trading - Professional Trading Signals"
                             className="h-24 w-auto hover:scale-105 transition-transform"
                         />
                     </Link>

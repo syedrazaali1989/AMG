@@ -4,11 +4,11 @@ import { Navbar } from '@/components/layout/Navbar';
 import { TrendingUp, Shield, Zap, BarChart3, Target, Award } from 'lucide-react';
 
 export const metadata: Metadata = {
-  title: 'AMGI Trading - Advanced Crypto & Forex Trading Signals',
+  title: 'AMG Trading - Advanced Crypto & Forex Trading Signals',
   description: 'Get real-time trading signals for cryptocurrency and forex markets. AI-powered analysis, technical indicators, and fundamental news integration for profitable trading decisions.',
-  keywords: 'trading signals, crypto trading, forex signals, AMGI Trading, cryptocurrency analysis, technical analysis, trading indicators, BTC signals, ETH signals',
+  keywords: 'trading signals, crypto trading, forex signals, AMG Trading, cryptocurrency analysis, technical analysis, trading indicators, BTC signals, ETH signals',
   openGraph: {
-    title: 'AMGI Trading - Professional Trading Signals',
+    title: 'AMG Trading - Professional Trading Signals',
     description: 'Real-time crypto and forex trading signals with AI-powered analysis',
     type: 'website',
   },
@@ -53,7 +53,7 @@ export default function Home() {
       <section className="py-16 md:py-24 bg-muted/20">
         <div className="container mx-auto px-4">
           <h2 className="text-3xl md:text-4xl font-bold text-center mb-12 text-gradient">
-            Why Choose AMGI Trading?
+            Why Choose AMG Trading?
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-8">
             <div className="glass rounded-xl p-6 md:p-8 hover:border-primary/50 transition-colors">
@@ -202,7 +202,8 @@ export default function Home() {
       <footer className="py-8 border-t border-border">
         <div className="container mx-auto px-4">
           <div className="text-center text-sm text-muted-foreground">
-            <p className="mb-2">© 2024 AMGI Trading. All rights reserved.</p>
+            <p className="mb-2">© 2025 AMG Trading. All rights reserved.</p>
+            <p className="text-sm text-muted-foreground">Design by Syed Raza Ali</p>
             <p>Professional trading signals for cryptocurrency and forex markets.</p>
           </div>
         </div>
