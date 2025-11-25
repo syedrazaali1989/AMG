@@ -1,0 +1,101 @@
+'use client';
+
+import { SignalDirection } from '@/lib/signals/types';
+import { Check, X } from 'lucide-react';
+import { cn } from '@/lib/utils';
+
+interface SignalDirectionFilterProps {
+    selectedDirections: SignalDirection[];
+    onDirectionsChange: (directions: SignalDirection[]) => void;
+}
+
+export function SignalDirectionFilter({ selectedDirections, onDirectionsChange }: SignalDirectionFilterProps) {
+    const directions = [
+        { value: SignalDirection.BUY, label: 'BUY', color: 'text-success border-success/30 bg-success/10' },
+        { value: SignalDirection.SELL, label: 'SELL', color: 'text-danger border-danger/30 bg-danger/10' },
+        { value: SignalDirection.LONG, label: 'LONG', color: 'text-success border-success/30 bg-success/10' },
+        { value: SignalDirection.SHORT, label: 'SHORT', color: 'text-danger border-danger/30 bg-danger/10' },
+    ];
+
+    const toggleDirection = (direction: SignalDirection) => {
+        if (selectedDirections.includes(direction)) {
+            onDirectionsChange(selectedDirections.filter(d => d !== direction));
+        } else {
+            onDirectionsChange([...selectedDirections, direction]);
+        }
+    };
+
+    const selectAll = () => {
+        onDirectionsChange([SignalDirection.BUY, SignalDirection.SELL, SignalDirection.LONG, SignalDirection.SHORT]);
+    };
+
+    const clearAll = () => {
+        onDirectionsChange([]);
+    };
+
+    return (
+        <div className="glass rounded-lg p-4 mb-6">
+            <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
+                    <span className="text-primary">🎯</span>
+                    Signal Direction Filter
+                </h3>
+                <div className="flex gap-2">
+                    <button
+                        onClick={selectAll}
+                        className="text-xs px-3 py-1 rounded-md bg-primary/20 text-primary hover:bg-primary/30 transition-colors"
+                    >
+                        Select All
+                    </button>
+                    <button
+                        onClick={clearAll}
+                        className="text-xs px-3 py-1 rounded-md bg-muted/20 text-muted-foreground hover:bg-muted/30 transition-colors"
+                    >
+                        Clear All
+                    </button>
+                </div>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {directions.map((direction) => {
+                    const isSelected = selectedDirections.includes(direction.value);
+
+                    return (
+                        <button
+                            key={direction.value}
+                            onClick={() => toggleDirection(direction.value)}
+                            className={cn(
+                                'relative flex items-center justify-between p-3 rounded-lg border-2 transition-all',
+                                isSelected
+                                    ? direction.color
+                                    : 'border-border/30 bg-muted/5 text-muted-foreground hover:border-border/50'
+                            )}
+                        >
+                            <span className="font-bold text-sm">{direction.label}</span>
+                            <div className={cn(
+                                'w-5 h-5 rounded flex items-center justify-center border-2',
+                                isSelected
+                                    ? 'border-current bg-current/20'
+                                    : 'border-muted-foreground/30'
+                            )}>
+                                {isSelected && <Check className="w-3 h-3" />}
+                            </div>
+                        </button>
+                    );
+                })}
+            </div>
+
+            {selectedDirections.length === 0 && (
+                <div className="mt-3 text-xs text-center text-muted-foreground flex items-center justify-center gap-2">
+                    <X className="w-4 h-4" />
+                    No directions selected - all signals hidden
+                </div>
+            )}
+            {selectedDirections.length > 0 && selectedDirections.length < 4 && (
+                <div className="mt-3 text-xs text-center text-muted-foreground">
+                    Showing {selectedDirections.length} of 4 signal types
+                </div>
+            )}
+        </div>
+    );
+}

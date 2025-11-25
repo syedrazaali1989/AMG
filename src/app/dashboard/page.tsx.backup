@@ -1,0 +1,251 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import { Navbar } from '@/components/layout/Navbar';
+import { SignalList } from '@/components/ui/SignalList';
+import { StatsCard } from '@/components/ui/StatsCard';
+import { MessageBox, useMessages } from '@/components/ui/MessageBox';
+import { Signal, SignalType, MarketType } from '@/lib/signals/types';
+import { SignalGenerator } from '@/lib/signals/generator';
+import { MarketDataManager } from '@/lib/signals/marketData';
+import { TrendingUp, Target, Activity, Award } from 'lucide-react';
+import { motion } from 'framer-motion';
+
+export default function DashboardPage() {
+    const [signals, setSignals] = useState<Signal[]>([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [selectedMarket, setSelectedMarket] = useState<'CRYPTO' | 'FOREX'>('CRYPTO');
+    const { messages, dismissMessage, showSuccess, showInfo } = useMessages();
+
+
+    console.log(`⏰ Starting price update interval for ${signals.length} signals...`);
+
+    // Update signals every 5 seconds for better real-time accuracy
+    const interval = setInterval(() => {
+        updateSignalPrices();
+    }, 5000);
+
+    return () => {
+        console.log('⏰ Clearing price update interval');
+        clearInterval(interval);
+    };
+}, [signals.length]); // Re-run when signals are generated
+
+
+const generateSignals = async () => {
+    setIsLoading(true);
+    console.log(`🚀 Starting signal generation for ${selectedMarket}...`);
+
+    try {
+        // Get pairs based on selected market
+        const allPairs = MarketDataManager.getAllPairs();
+        const filteredPairs = allPairs.filter(({ marketType }) =>
+            selectedMarket === 'CRYPTO' ? marketType === MarketType.CRYPTO : marketType === MarketType.FOREX
+        );
+
+        console.log(`📊 Analyzing ${filteredPairs.length} ${selectedMarket} pairs...`);
+
+        // Generate market data for each pair
+        const marketDataPromises = filteredPairs.map(({ pair, marketType }) =>
+            MarketDataManager.generateMarketData(pair, marketType, 100)
+        );
+
+        console.log('⏳ Fetching market data from Binance...');
+        const marketDataList = await Promise.all(marketDataPromises);
+        console.log(`✅ Market data fetched for ${marketDataList.length} pairs`);
+
+        // Generate signals for spot trading
+        console.log('🔍 Generating SPOT signals...');
+        const spotSignals = SignalGenerator.generateMultipleSignals(
+            marketDataList,
+            SignalType.SPOT
+        );
+        console.log(`📈 Generated ${spotSignals.length} SPOT signals`);
+
+        // Generate signals for futures trading
+        console.log('🔍 Generating FUTURE signals...');
+        const futureSignals = SignalGenerator.generateMultipleSignals(
+            marketDataList,
+            SignalType.FUTURE
+        );
+        console.log(`📉 Generated ${futureSignals.length} FUTURE signals`);
+
+        const allSignals = [...spotSignals, ...futureSignals];
+        console.log(`🎯 Total signals generated: ${allSignals.length}`);
+
+        setSignals(allSignals);
+        setIsLoading(false);
+
+        if (allSignals.length > 0) {
+            showSuccess(
+                `${allSignals.length} ${selectedMarket} Signals Generated`,
+                'High-confidence trading opportunities with real-time prices'
+            );
+        } else {
+            showInfo('No Signals', 'No high-confidence signals found at this time. Try again in a few moments.');
+        }
+    } catch (error) {
+        console.error('❌ Error generating signals:', error);
+        setIsLoading(false);
+        showInfo('Error', 'Failed to fetch real-time prices, using fallback data');
+    }
+};
+
+const updateSignalPrices = async () => {
+    try {
+        // Get all crypto pairs from current signals
+        const cryptoSignals = signals.filter(s => s.marketType === MarketType.CRYPTO);
+
+        if (cryptoSignals.length > 0) {
+            console.log('📡 Fetching real-time prices from Binance and MEXC...');
+
+            // Fetch real-time prices from Binance and MEXC for crypto pairs
+            const [binanceResult, mexcResult] = await Promise.allSettled([
+                MarketDataManager.getAllCryptoPrices(),
+                MarketDataManager.getAllMexcPrices()
+            ]);
+
+            const binancePrices = binanceResult.status === 'fulfilled' ? binanceResult.value : new Map<string, number>();
+            const mexcPrices = mexcResult.status === 'fulfilled' ? mexcResult.value : new Map<string, number>();
+
+            if (binanceResult.status === 'rejected') {
+                console.error('❌ Failed to fetch Binance prices:', binanceResult.reason);
+            }
+            if (mexcResult.status === 'rejected') {
+                console.error('❌ Failed to fetch MEXC prices:', mexcResult.reason);
+            }
+
+            setSignals(prevSignals => {
+                const updated = prevSignals.map(signal => {
+                    let newPrice = signal.currentPrice;
+                    let mexcPrice = signal.mexcPrice;
+
+                    // For crypto, use real Binance price
+                    if (signal.marketType === MarketType.CRYPTO) {
+                        const binanceSymbol = signal.pair.replace('/', '');
+                        const realPrice = binancePrices.get(binanceSymbol);
+                        const realMexcPrice = mexcPrices.get(binanceSymbol);
+
+                        if (realPrice) {
+                            newPrice = realPrice;
+                        }
+                        // Only update MEXC price if we got a new one, otherwise keep old one (or undefined)
+                        if (realMexcPrice) {
+                            mexcPrice = realMexcPrice;
+                        }
+
+                        if (realPrice || realMexcPrice) {
+                            console.log(`💹 ${signal.pair}: Binance ${realPrice?.toFixed(2) || 'N/A'} | MEXC ${realMexcPrice?.toFixed(2) || 'N/A'}`);
+                        }
+                    } else {
+                        // For Forex, simulate price movement
+                        const volatility = 0.001;
+                        const change = (Math.random() - 0.5) * volatility;
+                        newPrice = signal.currentPrice * (1 + change);
+                    }
+
+                    // Update signal with new price and MEXC price
+                    const updatedSignal = SignalGenerator.updateSignal(signal, newPrice);
+                    return {
+                        ...updatedSignal,
+                        mexcPrice
+                    };
+                });
+
+                // Check for completed signals
+                const newlyCompleted = updated.filter((signal, index) =>
+                    signal.status !== prevSignals[index].status &&
+                    signal.status === 'COMPLETED'
+                );
+
+                if (newlyCompleted.length > 0) {
+                    newlyCompleted.forEach(signal => {
+                        const isProfit = (signal.profitLossPercentage || 0) > 0;
+                        if (isProfit) {
+                            showSuccess(
+                                `Signal Completed: ${signal.pair}`,
+                                `Profit: ${signal.profitLossPercentage?.toFixed(2)}%`
+                            );
+                        }
+                    });
+                }
+
+                return updated;
+            });
+        }
+    } catch (error) {
+        console.error('❌ Error updating prices:', error);
+        // Fallback to simulated updates if API fails
+        setSignals(prevSignals => {
+            return prevSignals.map(signal => {
+                const volatility = signal.marketType === MarketType.CRYPTO ? 0.003 : 0.001;
+                const change = (Math.random() - 0.5) * volatility;
+                const newPrice = signal.currentPrice * (1 + change);
+                return SignalGenerator.updateSignal(signal, newPrice);
+            });
+        });
+    }
+};
+
+
+// Calculate statistics
+const stats = SignalGenerator.calculateAccuracy(signals);
+
+return (
+    title = "Total Signals"
+                        value = { stats.totalSignals }
+icon = { TrendingUp }
+    />
+                    <StatsCard
+                        title="Active Signals"
+                        value={stats.activeSignals}
+                        icon={Activity}
+                    />
+                    <StatsCard
+                        title="Accuracy Rate"
+                        value={`${stats.accuracyRate.toFixed(1)}%`}
+                        icon={Award}
+                        trend={{
+                            value: stats.accuracyRate - 85,
+                            isPositive: stats.accuracyRate >= 90
+                        }}
+                    />
+                    <StatsCard
+                        title="Avg Profit"
+                        value={`${stats.averageProfit.toFixed(2)}%`}
+                        icon={Target}
+                        trend={{
+                            value: stats.averageProfit,
+                            isPositive: stats.averageProfit > 0
+                        }}
+                    />
+                </div >
+
+    {/* Signals List */ }
+{
+    isLoading ? (
+        <div className="glass rounded-lg p-12 text-center">
+            <div className="animate-pulse">
+                <div className="text-muted-foreground">Loading signals...</div>
+            </div>
+        </div>
+    ) : (
+        <SignalList signals={signals} />
+    )
+}
+
+{/* Refresh Button */ }
+<div className="mt-8 text-center">
+    <motion.button
+        whileHover={{ scale: 1.05 }}
+        whileTap={{ scale: 0.95 }}
+        onClick={generateSignals}
+        className="px-6 py-3 rounded-lg bg-gradient-primary text-white font-bold shadow-lg shadow-primary/50"
+    >
+        Generate New Signals
+    </motion.button>
+</div>
+            </div >
+        </div >
+    );
+}

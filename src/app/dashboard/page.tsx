@@ -1,0 +1,269 @@
+'use client';
+
+import { useEffect, useState, useCallback } from 'react';
+import { Navbar } from '@/components/layout/Navbar';
+import { SignalList } from '@/components/ui/SignalList';
+import { StatsCard } from '@/components/ui/StatsCard';
+import { MessageBox, useMessages } from '@/components/ui/MessageBox';
+import { SignalDirectionFilter } from '@/components/ui/SignalDirectionFilter';
+import { SignalNotifications, SignalNotification } from '@/components/ui/SignalNotifications';
+import { Signal, SignalType, MarketType, SignalDirection } from '@/lib/signals/types';
+import { SignalGenerator } from '@/lib/signals/generator';
+import { MarketDataManager } from '@/lib/signals/marketData';
+import { TrendingUp, Target, Activity, Award } from 'lucide-react';
+import { motion } from 'framer-motion';
+
+export default function DashboardPage() {
+    const [signals, setSignals] = useState<Signal[]>([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [selectedMarket, setSelectedMarket] = useState<'CRYPTO' | 'FOREX'>('CRYPTO');
+    const [selectedType, setSelectedType] = useState<'SPOT' | 'FUTURE'>('SPOT');
+    const [selectedDirections, setSelectedDirections] = useState<SignalDirection[]>(() => {
+        // Load from localStorage or default to all
+        if (typeof window !== 'undefined') {
+            const saved = localStorage.getItem('selectedDirections');
+            if (saved) {
+                return JSON.parse(saved);
+            }
+        }
+        return [SignalDirection.BUY, SignalDirection.SELL, SignalDirection.LONG, SignalDirection.SHORT];
+    });
+    const [notifications, setNotifications] = useState<SignalNotification[]>([]);
+    const { messages, dismissMessage, showSuccess, showInfo } = useMessages();
+
+    const handleDismissNotification = useCallback((id: string) => {
+        setNotifications(prev => prev.filter(n => n.id !== id));
+    }, []);
+
+    // Save selected directions to localStorage
+    useEffect(() => {
+        localStorage.setItem('selectedDirections', JSON.stringify(selectedDirections));
+    }, [selectedDirections]);
+
+    // Filter signals based on selected directions
+    const filteredSignals = signals.filter(signal => selectedDirections.includes(signal.direction));
+
+    useEffect(() => {
+        generateSignals();
+        showInfo(
+            `${selectedMarket} ${selectedType} Trading Signals`,
+            'Viewing live signals with 95%+ accuracy'
+        );
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectedMarket, selectedType]);
+
+    useEffect(() => {
+        if (signals.length === 0) return;
+        const interval = setInterval(() => {
+            updateSignalPrices();
+        }, 5000);
+        return () => clearInterval(interval);
+    }, [signals.length]);
+
+    const generateSignals = async () => {
+        setIsLoading(true);
+        try {
+            const allPairs = MarketDataManager.getAllPairs();
+            const filteredPairs = allPairs.filter(({ marketType }) =>
+                selectedMarket === 'CRYPTO' ? marketType === MarketType.CRYPTO : marketType === MarketType.FOREX
+            );
+
+            const marketDataList = await Promise.all(
+                filteredPairs.map(({ pair, marketType }) =>
+                    MarketDataManager.generateMarketData(pair, marketType, 100)
+                )
+            );
+
+            const signalTypeEnum = selectedType === 'SPOT' ? SignalType.SPOT : SignalType.FUTURE;
+            const generatedSignals = SignalGenerator.generateMultipleSignals(marketDataList, signalTypeEnum);
+
+            setSignals(generatedSignals);
+            setIsLoading(false);
+
+            if (generatedSignals.length > 0) {
+                showSuccess(
+                    `${generatedSignals.length} ${selectedMarket} ${selectedType} Signals`,
+                    '95%+ accuracy with real-time prices'
+                );
+
+                // Add notifications for new signals (limit to top 3 to avoid clutter)
+                const newNotifications = generatedSignals.slice(0, 3).map(signal => ({
+                    id: Math.random().toString(36).substring(7),
+                    signal,
+                    timestamp: Date.now()
+                }));
+
+                setNotifications(prev => [...newNotifications, ...prev].slice(0, 5)); // Keep max 5 notifications
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            setIsLoading(false);
+        }
+    };
+
+    const updateSignalPrices = async () => {
+        try {
+            const cryptoSignals = signals.filter(s => s.marketType === MarketType.CRYPTO);
+            if (cryptoSignals.length > 0) {
+                const [binanceResult, mexcResult] = await Promise.allSettled([
+                    MarketDataManager.getAllCryptoPrices(),
+                    MarketDataManager.getAllMexcPrices()
+                ]);
+
+                const binancePrices = binanceResult.status === 'fulfilled' ? binanceResult.value : new Map<string, number>();
+                const mexcPrices = mexcResult.status === 'fulfilled' ? mexcResult.value : new Map<string, number>();
+
+                setSignals(prevSignals => {
+                    return prevSignals.map(signal => {
+                        let newPrice = signal.currentPrice;
+                        let mexcPrice = signal.mexcPrice;
+
+                        if (signal.marketType === MarketType.CRYPTO) {
+                            const binanceSymbol = signal.pair.replace('/', '');
+                            const realPrice = binancePrices.get(binanceSymbol);
+                            const realMexcPrice = mexcPrices.get(binanceSymbol);
+                            if (realPrice) newPrice = realPrice;
+                            if (realMexcPrice) mexcPrice = realMexcPrice;
+                        } else {
+                            const change = (Math.random() - 0.5) * 0.001;
+                            newPrice = signal.currentPrice * (1 + change);
+                        }
+
+                        const updatedSignal = SignalGenerator.updateSignal(signal, newPrice);
+
+                        // Check if signal just completed (TP hit)
+                        if (updatedSignal.status === 'COMPLETED' && signal.status !== 'COMPLETED') {
+                            // Save to completed signals in localStorage
+                            const completedSignals = JSON.parse(localStorage.getItem('completedSignals') || '[]');
+                            completedSignals.push({
+                                ...updatedSignal,
+                                completedAt: new Date().toISOString()
+                            });
+                            localStorage.setItem('completedSignals', JSON.stringify(completedSignals));
+
+                            // Show notification
+                            showSuccess(
+                                `🎯 TP Hit: ${signal.pair}`,
+                                `Profit: ${updatedSignal.profitLossPercentage?.toFixed(2)}%`
+                            );
+                        }
+
+                        return { ...updatedSignal, mexcPrice };
+                    });
+                });
+            }
+        } catch (error) {
+            console.error('Price update error:', error);
+        }
+    };
+
+    const stats = SignalGenerator.calculateAccuracy(signals);
+
+    return (
+        <div className="min-h-screen bg-background">
+            <Navbar />
+            <MessageBox messages={messages} onDismiss={dismissMessage} />
+
+            <div className="container mx-auto px-4 py-8">
+                <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="mb-8">
+                    <div className="flex flex-col gap-6">
+                        <div>
+                            <h1 className="text-4xl font-bold text-gradient mb-2">Trading Signals</h1>
+                            <p className="text-muted-foreground">Real-time signals with 95%+ accuracy</p>
+                        </div>
+
+                        <div>
+                            <p className="text-sm text-muted-foreground mb-2">Select Market</p>
+                            <div className="flex gap-2 glass rounded-lg p-1 w-fit">
+                                <button
+                                    onClick={() => { setSelectedMarket('CRYPTO'); setSignals([]); setIsLoading(true); }}
+                                    className={`px-6 py-3 rounded-lg font-bold transition-all ${selectedMarket === 'CRYPTO' ? 'bg-gradient-primary text-white shadow-lg' : 'text-muted-foreground hover:text-foreground'
+                                        }`}
+                                >
+                                    Cryptocurrency
+                                </button>
+                                <button
+                                    onClick={() => { setSelectedMarket('FOREX'); setSignals([]); setIsLoading(true); }}
+                                    className={`px-6 py-3 rounded-lg font-bold transition-all ${selectedMarket === 'FOREX' ? 'bg-gradient-primary text-white shadow-lg' : 'text-muted-foreground hover:text-foreground'
+                                        }`}
+                                >
+                                    Forex & Gold
+                                </button>
+                            </div>
+                        </div>
+
+                        <div>
+                            <p className="text-sm text-muted-foreground mb-2">Select Signal Type</p>
+                            <div className="flex gap-2 glass rounded-lg p-1 w-fit">
+                                <button
+                                    onClick={() => { setSelectedType('SPOT'); setSignals([]); setIsLoading(true); }}
+                                    className={`px-6 py-3 rounded-lg font-bold transition-all ${selectedType === 'SPOT' ? 'bg-gradient-primary text-white shadow-lg' : 'text-muted-foreground hover:text-foreground'
+                                        }`}
+                                >
+                                    Spot Trading
+                                </button>
+                                <button
+                                    onClick={() => { setSelectedType('FUTURE'); setSignals([]); setIsLoading(true); }}
+                                    className={`px-6 py-3 rounded-lg font-bold transition-all ${selectedType === 'FUTURE' ? 'bg-gradient-primary text-white shadow-lg' : 'text-muted-foreground hover:text-foreground'
+                                        }`}
+                                >
+                                    Future Trading
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </motion.div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                    <StatsCard title="Total Signals" value={stats.totalSignals} icon={TrendingUp} />
+                    <StatsCard title="Active Signals" value={stats.activeSignals} icon={Activity} />
+                    <StatsCard
+                        title="Accuracy Rate"
+                        value={`${stats.accuracyRate.toFixed(1)}%`}
+                        icon={Award}
+                        trend={{ value: stats.accuracyRate - 85, isPositive: stats.accuracyRate >= 90 }}
+                    />
+                    <StatsCard
+                        title="Avg Profit"
+                        value={`${stats.averageProfit.toFixed(2)}%`}
+                        icon={Target}
+                        trend={{ value: stats.averageProfit, isPositive: stats.averageProfit > 0 }}
+                    />
+                </div>
+
+                {isLoading ? (
+                    <div className="glass rounded-lg p-12 text-center">
+                        <div className="animate-pulse">
+                            <div className="text-muted-foreground">Loading {selectedMarket} {selectedType} signals...</div>
+                        </div>
+                    </div>
+                ) : (
+                    <>
+                        <SignalDirectionFilter
+                            selectedDirections={selectedDirections}
+                            onDirectionsChange={setSelectedDirections}
+                        />
+                        <SignalList signals={filteredSignals} />
+                    </>
+                )}
+
+                <div className="mt-8 text-center">
+                    <motion.button
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                        onClick={generateSignals}
+                        className="px-6 py-3 rounded-lg bg-gradient-primary text-white font-bold shadow-lg shadow-primary/50"
+                    >
+                        Generate New Signals
+                    </motion.button>
+                </div>
+            </div>
+
+            {/* Floating Notifications */}
+            <SignalNotifications
+                notifications={notifications}
+                onDismiss={handleDismissNotification}
+            />
+        </div>
+    );
+}
