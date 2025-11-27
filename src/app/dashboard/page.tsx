@@ -76,6 +76,10 @@ export default function DashboardPage() {
 
     const generateSignals = async () => {
         setIsLoading(true);
+        // Clear existing signals to prevent TP carry-over
+        setSignals([]);
+        setNotifications([]);
+
         try {
             const allPairs = MarketDataManager.getAllPairs();
             const filteredPairs = allPairs.filter(({ marketType }) =>
@@ -91,6 +95,7 @@ export default function DashboardPage() {
             const signalTypeEnum = selectedType === 'SPOT' ? SignalType.SPOT : SignalType.FUTURE;
             const generatedSignals = SignalGenerator.generateMultipleSignals(marketDataList, signalTypeEnum);
 
+            // Completely replace with fresh signals
             setSignals(generatedSignals);
             setIsLoading(false);
 
@@ -107,7 +112,7 @@ export default function DashboardPage() {
                     timestamp: Date.now()
                 }));
 
-                setNotifications(prev => [...newNotifications, ...prev].slice(0, 5)); // Keep max 5 notifications
+                setNotifications(newNotifications);
             }
         } catch (error) {
             console.error('Error:', error);

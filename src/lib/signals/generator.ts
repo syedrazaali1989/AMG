@@ -93,6 +93,9 @@ export class SignalGenerator {
             volumes
         );
 
+        // Check if this is a counter-trend signal
+        const isCounterTrend = this.isCounterTrendSignal(direction, advancedAnalysis.trend);
+
         // Calculate sentiment score (news + economic events)
         const technicalScore = (direction === SignalDirection.BUY || direction === SignalDirection.LONG) ? buyScore : sellScore;
         const sentimentScore = NewsAnalyzer.calculateSentimentScore(pair, technicalScore);
@@ -119,6 +122,11 @@ export class SignalGenerator {
         }
 
         const confidence = Math.round(Math.max(0, Math.min(100, finalConfidence)));
+
+        // Counter-trend signals require higher confidence (75%)
+        if (isCounterTrend && confidence < 75) {
+            return null; // Reject weak counter-trend signals
+        }
 
         // Reject signals below 45% confidence - balanced for both Crypto and Forex
         // Crypto pairs with real data will still generate high-confidence signals
@@ -246,7 +254,8 @@ export class SignalGenerator {
             marketTrend: advancedAnalysis.trend,
             riskScore: advancedAnalysis.riskScore,
             marketAnalysis: advancedAnalysis.reasoning,
-            liquidityZones: advancedAnalysis.keyLevels.liquidityZones
+            liquidityZones: advancedAnalysis.keyLevels.liquidityZones,
+            isCounterTrend // Flag counter-trend signals
         };
 
         return signal;
@@ -427,5 +436,22 @@ export class SignalGenerator {
             accuracyRate,
             averageProfit
         };
+    }
+
+    /**
+     * Check if signal direction contradicts market trend
+     * @param direction Signal direction
+     * @param trend Market trend
+     * @returns True if counter-trend signal
+     */
+    private static isCounterTrendSignal(direction: SignalDirection, trend: string): boolean {
+        const isBullishSignal = direction === SignalDirection.BUY || direction === SignalDirection.LONG;
+        const isBearishSignal = direction === SignalDirection.SELL || direction === SignalDirection.SHORT;
+
+        const isBearishMarket = trend === 'BEARISH' || trend === 'STRONG_BEARISH';
+        const isBullishMarket = trend === 'BULLISH' || trend === 'STRONG_BULLISH';
+
+        // Counter-trend: LONG in bearish market OR SHORT in bullish market
+        return (isBullishSignal && isBearishMarket) || (isBearishSignal && isBullishMarket);
     }
 }

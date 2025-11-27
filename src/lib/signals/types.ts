@@ -59,6 +59,8 @@ export interface Signal {
   riskScore?: number;
   marketAnalysis?: string[];
   liquidityZones?: { price: number; type: string; strength: number }[];
+  // Counter-trend indicator
+  isCounterTrend?: boolean; // True if trading against market trend
 }
 
 export interface TechnicalIndicators {

@@ -54,8 +54,30 @@ export function SignalCard({ signal, onClick }: SignalCardProps) {
                         <span className="text-base font-extrabold tracking-wide">
                             {signal.direction}
                         </span>
+                        {signal.isCounterTrend && (
+                            <span className="ml-1 text-orange-500">⚠️</span>
+                        )}
                     </div>
                 </div>
+
+                {/* Counter-Trend Warning Banner */}
+                {signal.isCounterTrend && (
+                    <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        className="mb-3 bg-orange-500/10 border-2 border-orange-500/30 rounded-lg p-3"
+                    >
+                        <div className="flex items-start gap-2">
+                            <span className="text-orange-500 text-lg flex-shrink-0">⚠️</span>
+                            <div className="flex-1">
+                                <div className="font-bold text-orange-500 text-xs mb-1">COUNTER-TREND SIGNAL</div>
+                                <div className="text-[11px] text-orange-500/90">
+                                    Trading against overall market trend ({signal.marketTrend}). Higher risk - use tight stops and smaller position size.
+                                </div>
+                            </div>
+                        </div>
+                    </motion.div>
+                )}
 
                 <div className="flex justify-between items-start mb-3 cursor-pointer">
                     <div className="flex items-center gap-3">
