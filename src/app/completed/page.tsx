@@ -54,10 +54,9 @@ export default function CompletedSignalsPage() {
                         signal.tp3Hit = true;
                     }
 
-                    // Generate unique key
+                    // Generate unique key (deterministic to avoid hydration mismatch)
                     const timestamp = signal.completedAt || new Date().toISOString();
-                    const randomPart = Math.random().toString(36).substring(2, 15);
-                    signal.uniqueKey = `signal-${index}-${timestamp}-${randomPart}`;
+                    signal.uniqueKey = `signal-${signal.id}-${index}-${timestamp.replace(/[:.]/g, '')}`;
 
                     return signal;
                 });

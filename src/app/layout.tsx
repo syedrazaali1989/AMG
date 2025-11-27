@@ -19,12 +19,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark">
-      <body className={`${inter.variable} antialiased`}>
-        <main className="min-h-screen">
-          {children}
-        </main>
-      </body>
+    <html lang="en" className={inter.className} suppressHydrationWarning>
+      <body className="min-h-screen bg-background text-foreground antialiased">{children}</body>
     </html>
   );
 }

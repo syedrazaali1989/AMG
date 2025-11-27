@@ -191,16 +191,16 @@ export class SignalGenerator {
         let takeProfit3: number;
 
         if (direction === SignalDirection.BUY || direction === SignalDirection.LONG) {
-            // For LONG/BUY: TP1 at 30%, TP2 at 60%, TP3 at 100% of the move
+            // For LONG/BUY: TP1 at 10%, TP2 at 50%, TP3 at 100% of the move
             const tpDistance = takeProfit - entryPrice;
-            takeProfit1 = entryPrice + (tpDistance * 0.30); // 30% of move
-            takeProfit2 = entryPrice + (tpDistance * 0.60); // 60% of move
+            takeProfit1 = entryPrice + (tpDistance * 0.10); // 10% of move (easier to hit)
+            takeProfit2 = entryPrice + (tpDistance * 0.50); // 50% of move
             takeProfit3 = takeProfit; // 100% (final TP)
         } else {
-            // For SHORT/SELL: TP1 at 30%, TP2 at 60%, TP3 at 100% of the move
+            // For SHORT/SELL: TP1 at 10%, TP2 at 50%, TP3 at 100% of the move
             const tpDistance = entryPrice - takeProfit;
-            takeProfit1 = entryPrice - (tpDistance * 0.30); // 30% of move
-            takeProfit2 = entryPrice - (tpDistance * 0.60); // 60% of move
+            takeProfit1 = entryPrice - (tpDistance * 0.10); // 10% of move (easier to hit)
+            takeProfit2 = entryPrice - (tpDistance * 0.50); // 50% of move
             takeProfit3 = takeProfit; // 100% (final TP)
         }
 
