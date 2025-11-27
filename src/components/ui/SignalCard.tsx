@@ -6,6 +6,7 @@ import { TrendingUp, TrendingDown, Clock, Target, Shield, DollarSign } from 'luc
 import { motion } from 'framer-motion';
 import { NewsIndicator } from './NewsIndicator';
 import { MarketAnalysisDisplay } from './MarketAnalysisDisplay';
+import { Countdown } from './Countdown';
 
 interface SignalCardProps {
     signal: Signal;
@@ -56,6 +57,20 @@ export function SignalCard({ signal, onClick }: SignalCardProps) {
                         </span>
                         {signal.isCounterTrend && (
                             <span className="ml-1 text-orange-500">⚠️</span>
+                        )}
+                    </div>
+
+                    {/* Timeframe Info */}
+                    <div className="flex items-center gap-2">
+                        <div className="glass-dark rounded-lg px-3 py-1.5 flex items-center gap-2 border border-primary/20">
+                            <Clock className="w-3.5 h-3.5 text-primary" />
+                            <span className="text-xs font-bold text-foreground">{signal.timeframe}</span>
+                        </div>
+                        {signal.nextCandleTime && (
+                            <div className="glass-dark rounded-lg px-3 py-1.5 flex items-center gap-1.5 border border-border/50">
+                                <span className="text-[10px] text-muted-foreground">Next:</span>
+                                <Countdown targetTime={signal.nextCandleTime} />
+                            </div>
                         )}
                     </div>
                 </div>

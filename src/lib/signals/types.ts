@@ -23,6 +23,16 @@ export enum SignalStatus {
   STOPPED = 'STOPPED'
 }
 
+export enum Timeframe {
+  ONE_MINUTE = '1m',
+  FIVE_MINUTES = '5m',
+  FIFTEEN_MINUTES = '15m',
+  ONE_HOUR = '1h',
+  FOUR_HOURS = '4h',
+  ONE_DAY = '1D'
+}
+
+
 export interface Signal {
   id: string;
   marketType: MarketType;
@@ -61,6 +71,9 @@ export interface Signal {
   liquidityZones?: { price: number; type: string; strength: number }[];
   // Counter-trend indicator
   isCounterTrend?: boolean; // True if trading against market trend
+  // Timeframe information
+  timeframe: Timeframe; // Candlestick timeframe for this signal
+  nextCandleTime?: Date; // When the next candle closes
 }
 
 export interface TechnicalIndicators {

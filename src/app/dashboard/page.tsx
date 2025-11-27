@@ -7,8 +7,9 @@ import { StatsCard } from '@/components/ui/StatsCard';
 import { MessageBox, useMessages } from '@/components/ui/MessageBox';
 import { SignalDirectionFilter } from '@/components/ui/SignalDirectionFilter';
 import { ConfidenceFilter, ConfidenceLevel, filterSignalsByConfidence } from '@/components/ui/ConfidenceFilter';
+import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { SignalNotifications, SignalNotification } from '@/components/ui/SignalNotifications';
-import { Signal, SignalType, MarketType, SignalDirection } from '@/lib/signals/types';
+import { Signal, SignalType, MarketType, SignalDirection, Timeframe } from '@/lib/signals/types';
 import { SignalGenerator } from '@/lib/signals/generator';
 import { MarketDataManager } from '@/lib/signals/marketData';
 import { TrendingUp, Target, Activity, Award } from 'lucide-react';
@@ -36,6 +37,13 @@ export default function DashboardPage() {
         }
         return 'ALL';
     });
+    const [selectedTimeframe, setSelectedTimeframe] = useState<Timeframe>(() => {
+        if (typeof window !== 'undefined') {
+            const saved = localStorage.getItem('selectedTimeframe');
+            if (saved) return saved as Timeframe;
+        }
+        return Timeframe.ONE_HOUR; // Default to 1-hour timeframe
+    });
     const [notifications, setNotifications] = useState<SignalNotification[]>([]);
     const { messages, dismissMessage, showSuccess, showInfo } = useMessages();
 
@@ -53,6 +61,11 @@ export default function DashboardPage() {
         localStorage.setItem('selectedConfidence', selectedConfidence);
     }, [selectedConfidence]);
 
+    // Save selected timeframe to localStorage  
+    useEffect(() => {
+        localStorage.setItem('selectedTimeframe', selectedTimeframe);
+    }, [selectedTimeframe]);
+
     // Filter signals based on selected directions and confidence
     const directionFilteredSignals = signals.filter(signal => selectedDirections.includes(signal.direction));
     const filteredSignals = filterSignalsByConfidence(directionFilteredSignals, selectedConfidence);
@@ -60,11 +73,11 @@ export default function DashboardPage() {
     useEffect(() => {
         generateSignals();
         showInfo(
-            `${selectedMarket} ${selectedType} Trading Signals`,
+            `${selectedMarket} ${selectedType} ${selectedTimeframe} Signals`,
             'Viewing live signals with 95%+ accuracy'
         );
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [selectedMarket, selectedType]);
+    }, [selectedMarket, selectedType, selectedTimeframe]);
 
     useEffect(() => {
         if (signals.length === 0) return;
@@ -93,7 +106,7 @@ export default function DashboardPage() {
             );
 
             const signalTypeEnum = selectedType === 'SPOT' ? SignalType.SPOT : SignalType.FUTURE;
-            const generatedSignals = SignalGenerator.generateMultipleSignals(marketDataList, signalTypeEnum);
+            const generatedSignals = SignalGenerator.generateMultipleSignals(marketDataList, signalTypeEnum, selectedTimeframe);
 
             // Completely replace with fresh signals
             setSignals(generatedSignals);
@@ -249,6 +262,12 @@ export default function DashboardPage() {
                         trend={{ value: stats.averageProfit, isPositive: stats.averageProfit > 0 }}
                     />
                 </div>
+
+                {/* Timeframe Selector */}
+                <TimeframeSelector
+                    selectedTimeframe={selectedTimeframe}
+                    onTimeframeChange={setSelectedTimeframe}
+                />
 
                 {isLoading ? (
                     <div className="glass rounded-lg p-12 text-center">

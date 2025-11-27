@@ -6,7 +6,8 @@ import {
     SignalDirection,
     SignalStatus,
     MarketType,
-    MarketData
+    MarketData,
+    Timeframe
 } from './types';
 import { TechnicalIndicators } from './indicators';
 import { NewsAnalyzer } from './newsAnalyzer';
@@ -17,11 +18,13 @@ export class SignalGenerator {
      * Generate trading signal based on technical analysis
      * @param marketData Market data for analysis
      * @param signalType Type of signal (SPOT/FUTURE)
+     * @param timeframe Candlestick timeframe for the signal
      * @returns Generated signal or null
      */
     static generateSignal(
         marketData: MarketData,
-        signalType: SignalType
+        signalType: SignalType,
+        timeframe: Timeframe = Timeframe.ONE_HOUR
     ): Signal | null {
         const { prices, volumes, pair, marketType, currentPrice } = marketData;
 
@@ -255,7 +258,10 @@ export class SignalGenerator {
             riskScore: advancedAnalysis.riskScore,
             marketAnalysis: advancedAnalysis.reasoning,
             liquidityZones: advancedAnalysis.keyLevels.liquidityZones,
-            isCounterTrend // Flag counter-trend signals
+            isCounterTrend, // Flag counter-trend signals
+            // Timeframe information
+            timeframe,
+            nextCandleTime: this.calculateNextCandleTime(timeframe)
         };
 
         return signal;
@@ -376,16 +382,18 @@ export class SignalGenerator {
      * Generate multiple signals for different pairs
      * @param pairs Array of pairs to analyze
      * @param signalType Type of signals to generate
+     * @param timeframe Candlestick timeframe for the signals
      * @returns Array of generated signals
      */
     static generateMultipleSignals(
         marketDataList: MarketData[],
-        signalType: SignalType
+        signalType: SignalType,
+        timeframe: Timeframe = Timeframe.ONE_HOUR
     ): Signal[] {
         const signals: Signal[] = [];
 
         for (const marketData of marketDataList) {
-            const signal = this.generateSignal(marketData, signalType);
+            const signal = this.generateSignal(marketData, signalType, timeframe);
             if (signal) {
                 signals.push(signal);
             }
@@ -453,5 +461,42 @@ export class SignalGenerator {
 
         // Counter-trend: LONG in bearish market OR SHORT in bullish market
         return (isBullishSignal && isBearishMarket) || (isBearishSignal && isBullishMarket);
+    }
+
+    /**
+     * Calculate when the next candle will close based on timeframe
+     * @param timeframe Selected timeframe
+     * @returns Date when next candle closes
+     */
+    private static calculateNextCandleTime(timeframe: Timeframe): Date {
+        const now = new Date();
+        const nextCandle = new Date(now);
+
+        switch (timeframe) {
+            case Timeframe.ONE_MINUTE:
+                nextCandle.setMinutes(now.getMinutes() + 1, 0, 0);
+                break;
+            case Timeframe.FIVE_MINUTES:
+                const nextFive = Math.ceil(now.getMinutes() / 5) * 5;
+                nextCandle.setMinutes(nextFive, 0, 0);
+                break;
+            case Timeframe.FIFTEEN_MINUTES:
+                const nextFifteen = Math.ceil(now.getMinutes() / 15) * 15;
+                nextCandle.setMinutes(nextFifteen, 0, 0);
+                break;
+            case Timeframe.ONE_HOUR:
+                nextCandle.setHours(now.getHours() + 1, 0, 0, 0);
+                break;
+            case Timeframe.FOUR_HOURS:
+                const nextFourHour = Math.ceil(now.getHours() / 4) * 4;
+                nextCandle.setHours(nextFourHour, 0, 0, 0);
+                break;
+            case Timeframe.ONE_DAY:
+                nextCandle.setDate(now.getDate() + 1);
+                nextCandle.setHours(0, 0, 0, 0);
+                break;
+        }
+
+        return nextCandle;
     }
 }
