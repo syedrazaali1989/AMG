@@ -7,9 +7,8 @@ import { StatsCard } from '@/components/ui/StatsCard';
 import { MessageBox, useMessages } from '@/components/ui/MessageBox';
 import { SignalDirectionFilter } from '@/components/ui/SignalDirectionFilter';
 import { ConfidenceFilter, ConfidenceLevel, filterSignalsByConfidence } from '@/components/ui/ConfidenceFilter';
-import { TimeframeSelector } from '@/components/ui/TimeframeSelector';
 import { SignalNotifications, SignalNotification } from '@/components/ui/SignalNotifications';
-import { Signal, SignalType, MarketType, SignalDirection, Timeframe } from '@/lib/signals/types';
+import { Signal, SignalType, MarketType, SignalDirection } from '@/lib/signals/types';
 import { SignalGenerator } from '@/lib/signals/generator';
 import { MarketDataManager } from '@/lib/signals/marketData';
 import { TrendingUp, Target, Activity, Award } from 'lucide-react';
@@ -21,14 +20,8 @@ export default function DashboardPage() {
     const [selectedMarket, setSelectedMarket] = useState<'CRYPTO' | 'FOREX'>('CRYPTO');
     const [selectedType, setSelectedType] = useState<'SPOT' | 'FUTURE'>('SPOT');
     const [selectedDirections, setSelectedDirections] = useState<SignalDirection[]>(() => {
-        // Load from localStorage or default to all
-        if (typeof window !== 'undefined') {
-            const saved = localStorage.getItem('selectedDirections');
-            if (saved) {
-                return JSON.parse(saved);
-            }
-        }
-        return [SignalDirection.BUY, SignalDirection.SELL, SignalDirection.LONG, SignalDirection.SHORT];
+        // Default to BUY/SELL for SPOT (initial state)
+        return [SignalDirection.BUY, SignalDirection.SELL];
     });
     const [selectedConfidence, setSelectedConfidence] = useState<ConfidenceLevel>(() => {
         if (typeof window !== 'undefined') {
@@ -36,13 +29,6 @@ export default function DashboardPage() {
             if (saved) return saved as ConfidenceLevel;
         }
         return 'ALL';
-    });
-    const [selectedTimeframe, setSelectedTimeframe] = useState<Timeframe>(() => {
-        if (typeof window !== 'undefined') {
-            const saved = localStorage.getItem('selectedTimeframe');
-            if (saved) return saved as Timeframe;
-        }
-        return Timeframe.ONE_HOUR; // Default to 1-hour timeframe
     });
     const [notifications, setNotifications] = useState<SignalNotification[]>([]);
     const { messages, dismissMessage, showSuccess, showInfo } = useMessages();
@@ -61,10 +47,16 @@ export default function DashboardPage() {
         localStorage.setItem('selectedConfidence', selectedConfidence);
     }, [selectedConfidence]);
 
-    // Save selected timeframe to localStorage  
+    // Auto-adjust selected directions when signal type changes
     useEffect(() => {
-        localStorage.setItem('selectedTimeframe', selectedTimeframe);
-    }, [selectedTimeframe]);
+        if (selectedType === 'SPOT') {
+            // Switch to BUY/SELL for SPOT
+            setSelectedDirections([SignalDirection.BUY, SignalDirection.SELL]);
+        } else {
+            // Switch to LONG/SHORT for FUTURE
+            setSelectedDirections([SignalDirection.LONG, SignalDirection.SHORT]);
+        }
+    }, [selectedType]);
 
     // Filter signals based on selected directions and confidence
     const directionFilteredSignals = signals.filter(signal => selectedDirections.includes(signal.direction));
@@ -73,11 +65,11 @@ export default function DashboardPage() {
     useEffect(() => {
         generateSignals();
         showInfo(
-            `${selectedMarket} ${selectedType} ${selectedTimeframe} Signals`,
+            `${selectedMarket} ${selectedType} Signals`,
             'Viewing live signals with 95%+ accuracy'
         );
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [selectedMarket, selectedType, selectedTimeframe]);
+    }, [selectedMarket, selectedType]);
 
     useEffect(() => {
         if (signals.length === 0) return;
@@ -106,7 +98,7 @@ export default function DashboardPage() {
             );
 
             const signalTypeEnum = selectedType === 'SPOT' ? SignalType.SPOT : SignalType.FUTURE;
-            const generatedSignals = SignalGenerator.generateMultipleSignals(marketDataList, signalTypeEnum, selectedTimeframe);
+            const generatedSignals = SignalGenerator.generateMultipleSignals(marketDataList, signalTypeEnum);
 
             // Completely replace with fresh signals
             setSignals(generatedSignals);
@@ -263,12 +255,6 @@ export default function DashboardPage() {
                     />
                 </div>
 
-                {/* Timeframe Selector */}
-                <TimeframeSelector
-                    selectedTimeframe={selectedTimeframe}
-                    onTimeframeChange={setSelectedTimeframe}
-                />
-
                 {isLoading ? (
                     <div className="glass rounded-lg p-12 text-center">
                         <div className="animate-pulse">
@@ -307,6 +293,7 @@ export default function DashboardPage() {
                                 <SignalDirectionFilter
                                     selectedDirections={selectedDirections}
                                     onDirectionsChange={setSelectedDirections}
+                                    signalType={selectedType}
                                 />
                             </div>
                         </div>

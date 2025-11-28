@@ -7,15 +7,19 @@ import { cn } from '@/lib/utils';
 interface SignalDirectionFilterProps {
     selectedDirections: SignalDirection[];
     onDirectionsChange: (directions: SignalDirection[]) => void;
+    signalType: 'SPOT' | 'FUTURE';
 }
 
-export function SignalDirectionFilter({ selectedDirections, onDirectionsChange }: SignalDirectionFilterProps) {
-    const directions = [
-        { value: SignalDirection.BUY, label: 'BUY', color: 'text-success border-success/30 bg-success/10' },
-        { value: SignalDirection.SELL, label: 'SELL', color: 'text-danger border-danger/30 bg-danger/10' },
-        { value: SignalDirection.LONG, label: 'LONG', color: 'text-success border-success/30 bg-success/10' },
-        { value: SignalDirection.SHORT, label: 'SHORT', color: 'text-danger border-danger/30 bg-danger/10' },
+export function SignalDirectionFilter({ selectedDirections, onDirectionsChange, signalType }: SignalDirectionFilterProps) {
+    const allDirections = [
+        { value: SignalDirection.BUY, label: 'BUY', color: 'text-success border-success/30 bg-success/10', type: 'SPOT' },
+        { value: SignalDirection.SELL, label: 'SELL', color: 'text-danger border-danger/30 bg-danger/10', type: 'SPOT' },
+        { value: SignalDirection.LONG, label: 'LONG', color: 'text-success border-success/30 bg-success/10', type: 'FUTURE' },
+        { value: SignalDirection.SHORT, label: 'SHORT', color: 'text-danger border-danger/30 bg-danger/10', type: 'FUTURE' },
     ];
+
+    // Filter directions based on signal type
+    const directions = allDirections.filter(d => d.type === signalType);
 
     const toggleDirection = (direction: SignalDirection) => {
         if (selectedDirections.includes(direction)) {
@@ -26,7 +30,9 @@ export function SignalDirectionFilter({ selectedDirections, onDirectionsChange }
     };
 
     const selectAll = () => {
-        onDirectionsChange([SignalDirection.BUY, SignalDirection.SELL, SignalDirection.LONG, SignalDirection.SHORT]);
+        // Select all directions for the current signal type
+        const relevantDirections = directions.map(d => d.value);
+        onDirectionsChange(relevantDirections);
     };
 
     const clearAll = () => {
@@ -93,9 +99,9 @@ export function SignalDirectionFilter({ selectedDirections, onDirectionsChange }
                     No directions selected - all signals hidden
                 </div>
             )}
-            {selectedDirections.length > 0 && selectedDirections.length < 4 && (
+            {selectedDirections.length > 0 && selectedDirections.length < directions.length && (
                 <div className="mt-3 text-xs text-center text-muted-foreground">
-                    Showing {selectedDirections.length} of 4 signal types
+                    Showing {selectedDirections.length} of {directions.length} signal types
                 </div>
             )}
         </div>
