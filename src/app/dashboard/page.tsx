@@ -66,7 +66,7 @@ export default function DashboardPage() {
         generateSignals();
         showInfo(
             `${selectedMarket} ${selectedType} Signals`,
-            'Viewing live signals with 95%+ accuracy'
+            'Viewing live signals with 75%+ accuracy'
         );
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [selectedMarket, selectedType]);
@@ -107,7 +107,7 @@ export default function DashboardPage() {
             if (generatedSignals.length > 0) {
                 showSuccess(
                     `${generatedSignals.length} ${selectedMarket} ${selectedType} Signals`,
-                    '95%+ accuracy with real-time prices'
+                    '75%+ accuracy with real-time prices'
                 );
 
                 // Add notifications for new signals (limit to top 3 to avoid clutter)
@@ -193,7 +193,7 @@ export default function DashboardPage() {
                     <div className="flex flex-col gap-6">
                         <div>
                             <h1 className="text-4xl font-bold text-gradient mb-2">Trading Signals</h1>
-                            <p className="text-muted-foreground">Real-time signals with 95%+ accuracy</p>
+                            <p className="text-muted-foreground">Real-time signals with 75%+ accuracy</p>
                         </div>
 
                         <div>
@@ -245,7 +245,7 @@ export default function DashboardPage() {
                         title="Accuracy Rate"
                         value={`${stats.accuracyRate.toFixed(1)}%`}
                         icon={Award}
-                        trend={{ value: stats.accuracyRate - 85, isPositive: stats.accuracyRate >= 90 }}
+                        trend={{ value: stats.accuracyRate - 85, isPositive: stats.accuracyRate >= 75 }}
                     />
                     <StatsCard
                         title="Avg Profit"

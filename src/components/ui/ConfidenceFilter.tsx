@@ -3,7 +3,7 @@
 import { motion } from 'framer-motion';
 import { TrendingUp } from 'lucide-react';
 
-export type ConfidenceLevel = 'ALL' | '60+' | '70+' | '80+' | '90+';
+export type ConfidenceLevel = 'ALL' | '60+' | '70+' | '75+' | '80+';
 
 interface ConfidenceFilterProps {
     selectedConfidence: ConfidenceLevel;
@@ -15,7 +15,7 @@ const confidenceLevels: { value: ConfidenceLevel; label: string; minValue: numbe
     { value: '60+', label: '60%+', minValue: 60 },
     { value: '70+', label: '70%+', minValue: 70 },
     { value: '80+', label: '80%+', minValue: 80 },
-    { value: '90+', label: '90%+', minValue: 90 },
+    { value: '75+', label: '75%+', minValue: 75 },
 ];
 
 export function ConfidenceFilter({ selectedConfidence, onConfidenceChange }: ConfidenceFilterProps) {
@@ -36,8 +36,8 @@ export function ConfidenceFilter({ selectedConfidence, onConfidenceChange }: Con
                         key={level.value}
                         onClick={() => onConfidenceChange(level.value)}
                         className={`px-4 py-2 rounded-lg font-medium transition-all ${selectedConfidence === level.value
-                                ? 'bg-gradient-primary text-white shadow-lg shadow-primary/30'
-                                : 'bg-muted/20 text-muted-foreground hover:bg-muted/40 hover:text-foreground'
+                            ? 'bg-gradient-primary text-white shadow-lg shadow-primary/30'
+                            : 'bg-muted/20 text-muted-foreground hover:bg-muted/40 hover:text-foreground'
                             }`}
                     >
                         {level.label}
