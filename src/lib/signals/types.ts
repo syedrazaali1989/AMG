@@ -32,6 +32,20 @@ export enum Timeframe {
   ONE_DAY = '1D'
 }
 
+// New enums for enhanced news integration
+export enum MarketCondition {
+  HIGH_VOLATILITY = 'HIGH_VOLATILITY',
+  NEWS_DRIVEN = 'NEWS_DRIVEN',
+  TRENDING = 'TRENDING',
+  RANGING = 'RANGING'
+}
+
+export enum TechnicalAlignment {
+  STRONG = 'STRONG',
+  MODERATE = 'MODERATE',
+  WEAK = 'WEAK'
+}
+
 
 export interface Signal {
   id: string;
@@ -69,11 +83,17 @@ export interface Signal {
   riskScore?: number;
   marketAnalysis?: string[];
   liquidityZones?: { price: number; type: string; strength: number }[];
-  // Counter-trend indicator
   isCounterTrend?: boolean; // True if trading against market trend
   // Timeframe information
   timeframe: Timeframe; // Candlestick timeframe for this signal
   nextCandleTime?: Date; // When the next candle closes
+  // Enhanced news integration fields
+  marketCondition?: MarketCondition; // Market condition classification
+  newsImpactScore?: number; // Aggregate news score (-5 to +5)
+  technicalAlignment?: TechnicalAlignment; // How well technicals align
+  validUntil?: Date; // Signal validity timestamp
+  rationalePoints?: string[]; // 3-bullet rationale (news + technicals + volume)
+  volumeVsAverage?: number; // Current volume as % of average
 }
 
 export interface TechnicalIndicators {

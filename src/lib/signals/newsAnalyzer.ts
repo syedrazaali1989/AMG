@@ -1,4 +1,5 @@
 // News and Sentiment Analysis Engine
+// Enhanced with Google News API integration and advanced sentiment scoring
 
 import {
     NewsEvent,
@@ -8,85 +9,154 @@ import {
     NewsImpact,
     SentimentScore
 } from './newsTypes';
+import { GoogleNewsAPI, NewsArticle } from './googleNewsAPI';
 
 export class NewsAnalyzer {
-    // News Templates
-    private static readonly BULLISH_TEMPLATES = [
-        { title: 'Institutional Inflows Surge', desc: 'Major funds accumulating {asset} at record pace', category: NewsCategory.ADOPTION },
-        { title: 'Regulatory Clarity Achieved', desc: 'New framework provides legal certainty for {asset}', category: NewsCategory.REGULATORY },
-        { title: 'Network Upgrade Successful', desc: 'Efficiency improvements drive lower fees and higher throughput', category: NewsCategory.TECHNICAL },
-        { title: 'Major Partnership Announced', desc: '{asset} foundation partners with Fortune 500 company', category: NewsCategory.ADOPTION },
-        { title: 'ETF Approval Rumors', desc: 'Sources suggest imminent approval of spot ETF', category: NewsCategory.REGULATORY }
-    ];
-
-    private static readonly BEARISH_TEMPLATES = [
-        { title: 'Regulatory Crackdown Fears', desc: 'Authorities signal tighter controls on crypto trading', category: NewsCategory.REGULATORY },
-        { title: 'Exchange Outflow Detected', desc: 'Large movement of {asset} to exchanges suggests selling pressure', category: NewsCategory.MARKET },
-        { title: 'Network Congestion Issues', desc: 'High fees and slow transactions plague the network', category: NewsCategory.TECHNICAL },
-        { title: 'Macroeconomic Headwinds', desc: 'Global economic uncertainty weighs on risk assets', category: NewsCategory.ECONOMIC },
-        { title: 'Security Vulnerability Found', desc: 'Minor exploit discovered in related protocol', category: NewsCategory.TECHNICAL }
-    ];
-
-    private static readonly NEUTRAL_TEMPLATES = [
-        { title: 'Trading Volume Stabilizes', desc: 'Market activity returns to normal levels after volatility', category: NewsCategory.MARKET },
-        { title: 'Developer Activity Report', desc: 'Steady progress on roadmap milestones', category: NewsCategory.TECHNICAL },
-        { title: 'Community Governance Vote', desc: 'Proposal for minor parameter adjustments passes', category: NewsCategory.ADOPTION },
-        { title: 'Wallet Address Growth', desc: 'Steady increase in new active addresses', category: NewsCategory.ADOPTION }
-    ];
+    // Cache for fetched news articles
+    private static newsArticlesCache: Map<string, { articles: NewsArticle[]; timestamp: number }> = new Map();
+    private static readonly CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
     /**
-     * Generate dynamic news events based on market sentiment
+     * Get relevant news keywords for a trading pair
      */
-    static getCurrentNews(pair: string): NewsEvent[] {
-        const now = new Date();
-        const news: NewsEvent[] = [];
-        const asset = pair.split('/')[0]; // e.g., BTC from BTC/USDT
+    private static getRelevantKeywords(pair: string): string[] {
+        const [base, quote] = pair.split('/');
+        const keywords: string[] = [];
 
-        // Determine overall sentiment for this generation (randomized)
-        const rand = Math.random();
-        let sentimentType: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
-
-        if (rand > 0.6) sentimentType = 'BULLISH';
-        else if (rand < 0.3) sentimentType = 'BEARISH';
-        else sentimentType = 'NEUTRAL';
-
-        // Generate 1-2 news items
-        const count = 1 + Math.floor(Math.random() * 2);
-
-        for (let i = 0; i < count; i++) {
-            let template;
-            let sentiment: NewsSentiment;
-            let impact: NewsImpact;
-
-            if (sentimentType === 'BULLISH') {
-                template = this.BULLISH_TEMPLATES[Math.floor(Math.random() * this.BULLISH_TEMPLATES.length)];
-                sentiment = Math.random() > 0.7 ? NewsSentiment.VERY_BULLISH : NewsSentiment.BULLISH;
-                impact = Math.random() > 0.8 ? NewsImpact.CRITICAL : NewsImpact.HIGH;
-            } else if (sentimentType === 'BEARISH') {
-                template = this.BEARISH_TEMPLATES[Math.floor(Math.random() * this.BEARISH_TEMPLATES.length)];
-                sentiment = Math.random() > 0.7 ? NewsSentiment.VERY_BEARISH : NewsSentiment.BEARISH;
-                impact = Math.random() > 0.8 ? NewsImpact.CRITICAL : NewsImpact.HIGH;
-            } else {
-                template = this.NEUTRAL_TEMPLATES[Math.floor(Math.random() * this.NEUTRAL_TEMPLATES.length)];
-                sentiment = NewsSentiment.NEUTRAL;
-                impact = NewsImpact.MEDIUM;
-            }
-
-            news.push({
-                id: `news-${Date.now()}-${i}`,
-                title: template.title.replace('{asset}', asset),
-                description: template.desc.replace('{asset}', asset),
-                category: template.category,
-                sentiment: sentiment,
-                impact: impact,
-                affectedMarkets: [asset, 'ALL_CRYPTO'],
-                timestamp: new Date(now.getTime() - Math.floor(Math.random() * 12) * 60 * 60 * 1000), // Last 12 hours
-                source: ['Bloomberg', 'Reuters', 'CoinDesk', 'CoinTelegraph'][Math.floor(Math.random() * 4)],
-                confidence: 85 + Math.floor(Math.random() * 15)
-            });
+        // Crypto-specific keywords
+        if (pair.includes('USDT') || pair.includes('BTC') || pair.includes('ETH')) {
+            keywords.push(...GoogleNewsAPI.KEYWORD_CATEGORIES.CRYPTO_SPECIFIC);
+            if (base === 'BTC') keywords.push('Bitcoin');
+            if (base === 'ETH') keywords.push('Ethereum');
         }
 
-        return news;
+        // Forex-specific keywords
+        if (pair.includes('USD') || pair.includes('EUR') || pair.includes('GBP')) {
+            keywords.push(...GoogleNewsAPI.KEYWORD_CATEGORIES.MONETARY_POLICY);
+            keywords.push(...GoogleNewsAPI.KEYWORD_CATEGORIES.FOREX_SPECIFIC);
+        }
+
+        // Common macro keywords for all assets
+        keywords.push(...GoogleNewsAPI.KEYWORD_CATEGORIES.INFLATION);
+        keywords.push(...GoogleNewsAPI.KEYWORD_CATEGORIES.ECONOMIC_DATA);
+        keywords.push(...GoogleNewsAPI.KEYWORD_CATEGORIES.GEOPOLITICAL);
+
+        // Commodities
+        if (pair.includes('XAU') || pair.includes('XAG')) {
+            keywords.push(...GoogleNewsAPI.KEYWORD_CATEGORIES.COMMODITIES);
+        }
+        if (pair.includes('CL') || pair.includes('OIL')) {
+            keywords.push('oil prices', 'crude oil', 'OPEC');
+        }
+
+        // Remove duplicates
+        return [...new Set(keywords)];
+    }
+
+    /**
+     * Fetch real-time news for a trading pair
+     * Uses Google News API with intelligent caching
+     */
+    static async getCurrentNews(pair: string): Promise<NewsEvent[]> {
+        const cacheKey = pair;
+        const cached = this.newsArticlesCache.get(cacheKey);
+
+        // Return cached if fresh
+        if (cached && Date.now() - cached.timestamp < this.CACHE_DURATION) {
+            return this.convertArticlesToNewsEvents(cached.articles, pair);
+        }
+
+        // Fetch fresh news
+        const keywords = this.getRelevantKeywords(pair);
+        const articles = await GoogleNewsAPI.fetchNews({
+            keywords,
+            maxResults: 10,
+        });
+
+        // Cache the results
+        this.newsArticlesCache.set(cacheKey, { articles, timestamp: Date.now() });
+
+        return this.convertArticlesToNewsEvents(articles, pair);
+    }
+
+    /**
+     * Convert NewsArticles to NewsEvents
+     */
+    private static convertArticlesToNewsEvents(articles: NewsArticle[], pair: string): NewsEvent[] {
+        const asset = pair.split('/')[0];
+
+        return articles.map(article => {
+            const sentiment = this.convertSentimentToEnum(article.sentiment);
+            const impact = this.determineImpactLevel(article.urgency, article.credibility);
+            const category = this.categorizeNews(article.keywords);
+
+            return {
+                id: article.id,
+                title: article.title,
+                description: article.description,
+                category,
+                sentiment,
+                impact,
+                affectedMarkets: this.getAffectedMarkets(pair, article.keywords),
+                timestamp: article.publishedAt,
+                source: article.source,
+                confidence: article.credibility,
+            };
+        });
+    }
+
+    /**
+     * Convert numerical sentiment to enum
+     */
+    private static convertSentimentToEnum(sentiment: number): NewsSentiment {
+        if (sentiment >= 0.6) return NewsSentiment.VERY_BULLISH;
+        if (sentiment >= 0.2) return NewsSentiment.BULLISH;
+        if (sentiment <= -0.6) return NewsSentiment.VERY_BEARISH;
+        if (sentiment <= -0.2) return NewsSentiment.BEARISH;
+        return NewsSentiment.NEUTRAL;
+    }
+
+    /**
+     * Determine impact level based on urgency and credibility
+     */
+    private static determineImpactLevel(urgency: string, credibility: number): NewsImpact {
+        if (urgency === 'BREAKING' && credibility >= 85) return NewsImpact.CRITICAL;
+        if (urgency === 'BREAKING' || credibility >= 80) return NewsImpact.HIGH;
+        if (urgency === 'REGULAR') return NewsImpact.MEDIUM;
+        return NewsImpact.LOW;
+    }
+
+    /**
+     * Categorize news based on keywords
+     */
+    private static categorizeNews(keywords: string[]): NewsCategory {
+        const keywordStr = keywords.join(' ').toLowerCase();
+
+        if (keywordStr.includes('regulation') || keywordStr.includes('sec')) return NewsCategory.REGULATORY;
+        if (keywordStr.includes('adoption') || keywordStr.includes('etf')) return NewsCategory.ADOPTION;
+        if (keywordStr.includes('gdp') || keywordStr.includes('inflation')) return NewsCategory.ECONOMIC;
+        if (keywordStr.includes('blockchain') || keywordStr.includes('upgrade')) return NewsCategory.TECHNICAL;
+
+        return NewsCategory.MARKET;
+    }
+
+    /**
+     * Get affected markets from keywords
+     */
+    private static getAffectedMarkets(pair: string, keywords: string[]): string[] {
+        const [base] = pair.split('/');
+        const affected = [base];
+
+        const keywordStr = keywords.join(' ').toLowerCase();
+
+        if (keywordStr.includes('crypto') || keywordStr.includes('bitcoin')) {
+            affected.push('ALL_CRYPTO');
+        }
+        if (keywordStr.includes('forex') || keywordStr.includes('dollar') || keywordStr.includes('fed')) {
+            affected.push('ALL_FOREX');
+        }
+
+        return affected;
     }
 
     /**
@@ -128,9 +198,10 @@ export class NewsAnalyzer {
 
     /**
      * Calculate sentiment score for a specific pair
+     * Enhanced with real-time news and -5 to +5 aggregate scoring
      */
-    static calculateSentimentScore(pair: string, technicalScore: number): SentimentScore {
-        const news = this.getCurrentNews(pair);
+    static async calculateSentimentScore(pair: string, technicalScore: number): Promise<SentimentScore> {
+        const news = await this.getCurrentNews(pair);
         const economicEvents = this.getEconomicEvents();
 
         let newsScore = 0;
@@ -174,6 +245,84 @@ export class NewsAnalyzer {
             technical: technicalScore,
             timestamp: new Date()
         };
+    }
+
+    /**
+     * Get aggregate news impact assessment (-5 to +5 scale)
+     * For last 2 hours of news
+     */
+    static async getNewsImpactAssessment(pair: string): Promise<{
+        score: number; // -5 to +5
+        catalyst: 'STRONG_BULLISH' | 'BULLISH' | 'NEUTRAL' | 'BEARISH' | 'STRONG_BEARISH';
+        recentNews: NewsEvent[];
+    }> {
+        const allNews = await this.getCurrentNews(pair);
+
+        // Filter for last 2 hours
+        const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+        const recentNews = allNews.filter(news => news.timestamp >= twoHoursAgo);
+
+        if (recentNews.length === 0) {
+            return {
+                score: 0,
+                catalyst: 'NEUTRAL',
+                recentNews: []
+            };
+        }
+
+        // Convert to NewsArticles for aggregate calculation
+        const articles: NewsArticle[] = recentNews.map(news => ({
+            id: news.id,
+            title: news.title,
+            description: news.description,
+            url: '',
+            source: news.source,
+            publishedAt: news.timestamp,
+            keywords: [],
+            sentiment: this.convertEnumToSentiment(news.sentiment),
+            urgency: this.getUrgencyFromTimestamp(news.timestamp),
+            credibility: news.confidence
+        }));
+
+        const aggregateScore = GoogleNewsAPI.calculateAggregateSentiment(articles);
+
+        // Determine catalyst type
+        let catalyst: 'STRONG_BULLISH' | 'BULLISH' | 'NEUTRAL' | 'BEARISH' | 'STRONG_BEARISH';
+        if (aggregateScore >= 3) catalyst = 'STRONG_BULLISH';
+        else if (aggregateScore >= 1) catalyst = 'BULLISH';
+        else if (aggregateScore <= -3) catalyst = 'STRONG_BEARISH';
+        else if (aggregateScore <= -1) catalyst = 'BEARISH';
+        else catalyst = 'NEUTRAL';
+
+        return {
+            score: aggregateScore,
+            catalyst,
+            recentNews
+        };
+    }
+
+    /**
+     * Convert sentiment enum to numerical value
+     */
+    private static convertEnumToSentiment(sentiment: NewsSentiment): number {
+        const map = {
+            [NewsSentiment.VERY_BULLISH]: 0.8,
+            [NewsSentiment.BULLISH]: 0.4,
+            [NewsSentiment.NEUTRAL]: 0,
+            [NewsSentiment.BEARISH]: -0.4,
+            [NewsSentiment.VERY_BEARISH]: -0.8
+        };
+        return map[sentiment];
+    }
+
+    /**
+     * Determine urgency from timestamp
+     */
+    private static getUrgencyFromTimestamp(timestamp: Date): 'BREAKING' | 'REGULAR' | 'OLD' {
+        const hoursAgo = (Date.now() - timestamp.getTime()) / (1000 * 60 * 60);
+        if (hoursAgo < 2) return 'BREAKING';
+        if (hoursAgo < 24) return 'REGULAR';
+        return 'OLD';
     }
 
     /**
@@ -222,19 +371,18 @@ export class NewsAnalyzer {
     /**
      * Get news summary for a pair
      */
-    static getNewsSummary(pair: string): string[] {
-        // We generate fresh news here for the summary to match the calculation
-        // In a real app, this would fetch the SAME news used for calculation
-        // For simulation, we'll just regenerate compatible news
-        const news = this.getCurrentNews(pair);
+    static async getNewsSummary(pair: string): Promise<string[]> {
+        const news = await this.getCurrentNews(pair);
         const relevantNews: string[] = [];
 
         for (const event of news) {
             const sentiment = event.sentiment.replace('_', ' ');
-            relevantNews.push(`${event.title} (${sentiment})`);
+            const urgency = this.getUrgencyFromTimestamp(event.timestamp);
+            const urgencyIcon = urgency === 'BREAKING' ? '⚡' : urgency === 'REGULAR' ? '📰' : '📅';
+            relevantNews.push(`${urgencyIcon} ${event.title} (${sentiment})`);
         }
 
-        return relevantNews;
+        return relevantNews.slice(0, 5); // Return top 5
     }
 
     /**

@@ -98,7 +98,7 @@ export default function DashboardPage() {
             );
 
             const signalTypeEnum = selectedType === 'SPOT' ? SignalType.SPOT : SignalType.FUTURE;
-            const generatedSignals = SignalGenerator.generateMultipleSignals(marketDataList, signalTypeEnum);
+            const generatedSignals = await SignalGenerator.generateMultipleSignals(marketDataList, signalTypeEnum);
 
             // Completely replace with fresh signals
             setSignals(generatedSignals);

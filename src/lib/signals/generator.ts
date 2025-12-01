@@ -7,25 +7,29 @@ import {
     SignalStatus,
     MarketType,
     MarketData,
-    Timeframe
+    Timeframe,
+    MarketCondition,
+    TechnicalAlignment
 } from './types';
 import { TechnicalIndicators } from './indicators';
 import { NewsAnalyzer } from './newsAnalyzer';
 import { AdvancedMarketAnalyzer, MarketAnalysis } from './advancedAnalyzer';
+import { SignalHelpers } from './signalHelpers';
 
 export class SignalGenerator {
     /**
-     * Generate trading signal based on technical analysis
+     * Generate trading signal with news + technical confirmation
+     * Enhanced with real-time news analysis
      * @param marketData Market data for analysis
      * @param signalType Type of signal (SPOT/FUTURE)
      * @param timeframe Candlestick timeframe for the signal
      * @returns Generated signal or null
      */
-    static generateSignal(
+    static async generateSignal(
         marketData: MarketData,
         signalType: SignalType,
         timeframe: Timeframe = Timeframe.ONE_HOUR
-    ): Signal | null {
+    ): Promise<Signal | null> {
         const { prices, volumes, pair, marketType, currentPrice } = marketData;
 
         // Calculate all technical indicators
@@ -99,9 +103,14 @@ export class SignalGenerator {
         // Check if this is a counter-trend signal
         const isCounterTrend = this.isCounterTrendSignal(direction, advancedAnalysis.trend);
 
+        // === ASYNC NEWS INTEGRATION ===
+        // Get real-time news impact (last 2 hours)
+        const newsImpact = await NewsAnalyzer.getNewsImpactAssessment(pair);
+        const newsImpactScore = newsImpact.score; // -5 to +5
+
         // Calculate sentiment score (news + economic events)
         const technicalScore = (direction === SignalDirection.BUY || direction === SignalDirection.LONG) ? buyScore : sellScore;
-        const sentimentScore = NewsAnalyzer.calculateSentimentScore(pair, technicalScore);
+        const sentimentScore = await NewsAnalyzer.calculateSentimentScore(pair, technicalScore);
 
         // Combine technical and fundamental analysis
         // Technical: 60%, News: 20%, Economic: 20%
@@ -223,8 +232,37 @@ export class SignalGenerator {
         expiresAt.setHours(expiresAt.getHours() + (signalType === SignalType.SPOT ? 24 : 48));
 
         // Get relevant news and economic events
-        const newsEvents = NewsAnalyzer.getNewsSummary(pair);
+        const newsEvents = await NewsAnalyzer.getNewsSummary(pair);
         const economicEvents = NewsAnalyzer.getEconomicSummary(pair);
+
+        // Determine market condition
+        const marketCondition = SignalHelpers.determineMarketCondition(
+            newsImpactScore,
+            currentVolume,
+            volumeAvg,
+            advancedAnalysis.trend
+        );
+
+        // Generate 3-bullet rationale
+        const rationalePoints = SignalHelpers.generateRationale(
+            newsImpact.catalyst,
+            newsImpact.recentNews,
+            rsi,
+            macd,
+            currentVolume,
+            volumeAvg,
+            direction,
+            TechnicalAlignment.STRONG // Will be calculated properly in next update
+        );
+
+        // Calculate volume vs average
+        const volumeVsAverage = Math.round((currentVolume / volumeAvg) * 100);
+
+        // Set validUntil based on market condition
+        const validUntil = new Date();
+        const validityHours = marketCondition === MarketCondition.NEWS_DRIVEN ? 2 :
+            marketCondition === MarketCondition.HIGH_VOLATILITY ? 4 : 12;
+        validUntil.setHours(validUntil.getHours() + validityHours);
 
         const signal: Signal = {
             id,
@@ -261,7 +299,14 @@ export class SignalGenerator {
             isCounterTrend, // Flag counter-trend signals
             // Timeframe information
             timeframe,
-            nextCandleTime: this.calculateNextCandleTime(timeframe)
+            nextCandleTime: this.calculateNextCandleTime(timeframe),
+            // Enhanced news integration
+            marketCondition,
+            newsImpactScore,
+            technicalAlignment: TechnicalAlignment.STRONG, // Placeholder - will be properly calculated
+            validUntil,
+            rationalePoints,
+            volumeVsAverage
         };
 
         return signal;
@@ -385,15 +430,15 @@ export class SignalGenerator {
      * @param timeframe Candlestick timeframe for the signals
      * @returns Array of generated signals
      */
-    static generateMultipleSignals(
+    static async generateMultipleSignals(
         marketDataList: MarketData[],
         signalType: SignalType,
         timeframe: Timeframe = Timeframe.ONE_HOUR
-    ): Signal[] {
+    ): Promise<Signal[]> {
         const signals: Signal[] = [];
 
         for (const marketData of marketDataList) {
-            const signal = this.generateSignal(marketData, signalType, timeframe);
+            const signal = await this.generateSignal(marketData, signalType, timeframe);
             if (signal) {
                 signals.push(signal);
             }
