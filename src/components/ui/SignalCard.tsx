@@ -6,6 +6,9 @@ import { TrendingUp, TrendingDown, Clock, Target, Shield, DollarSign } from 'luc
 import { motion } from 'framer-motion';
 import { NewsIndicator } from './NewsIndicator';
 import { MarketAnalysisDisplay } from './MarketAnalysisDisplay';
+import { PredictionDisplay } from './PredictionDisplay';
+import { PatternDisplay } from './PatternDisplay';
+import { TimeframeDisplay } from './TimeframeDisplay';
 
 interface SignalCardProps {
     signal: Signal;
@@ -274,6 +277,14 @@ export function SignalCard({ signal, onClick }: SignalCardProps) {
 
             {/* Advanced Market Analysis */}
             <MarketAnalysisDisplay signal={signal} />
+
+            {/* Predictive AI Displays */}
+            <PredictionDisplay
+                nextCandlePrediction={signal.nextCandlePrediction}
+                predictionConsensus={signal.predictionConsensus}
+            />
+            <PatternDisplay patterns={signal.detectedPatterns} />
+            <TimeframeDisplay alignment={signal.timeframeAlignment} />
 
             {/* News and Economic Events */}
             <NewsIndicator signal={signal} />

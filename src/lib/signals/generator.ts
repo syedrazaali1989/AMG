@@ -15,8 +15,22 @@ import { TechnicalIndicators } from './indicators';
 import { NewsAnalyzer } from './newsAnalyzer';
 import { AdvancedMarketAnalyzer, MarketAnalysis } from './advancedAnalyzer';
 import { SignalHelpers } from './signalHelpers';
+import { PredictionEngine } from '../ml/predictionEngine';
+import { MultiTimeframeAnalyzer } from '../timeframe/multiTimeframeAnalyzer';
 
 export class SignalGenerator {
+    private static predictionEngineInitialized = false;
+
+    /**
+     * Initialize prediction engine (call once on app start)
+     */
+    static async initializePrediction(): Promise<void> {
+        if (!this.predictionEngineInitialized) {
+            await PredictionEngine.initialize();
+            this.predictionEngineInitialized = true;
+            console.log('✅ Predictive AI Engine Ready');
+        }
+    }
     /**
      * Generate trading signal with news + technical confirmation
      * Enhanced with real-time news analysis
@@ -144,6 +158,79 @@ export class SignalGenerator {
         // Crypto pairs with real data will still generate high-confidence signals
         // Forex pairs with simulated data will generate more opportunities
         if (confidence < 45) return null;
+
+        // ============================================
+        // PREDICTIVE AI INTEGRATION
+        // ============================================
+
+        // Determine technical bias for prediction engine
+        const technicalBias: 'BULLISH' | 'BEARISH' | 'NEUTRAL' =
+            (direction === SignalDirection.BUY || direction === SignalDirection.LONG) ? 'BULLISH' :
+                (direction === SignalDirection.SELL || direction === SignalDirection.SHORT) ? 'BEARISH' : 'NEUTRAL';
+
+        // Generate comprehensive predictions (ML + Patterns + Multi-Timeframe)
+        let mlPrediction = undefined;
+        let detectedPatterns = undefined;
+        let nextCandlePrediction = undefined;
+        let predictionConsensus = undefined;
+        let timeframeAlignment = undefined;
+
+        try {
+            // Initialize prediction engine if not already done
+            await this.initializePrediction();
+
+            // Generate predictions using unified engine
+            const predictions = await PredictionEngine.generatePrediction({
+                prices,
+                volumes,
+                rsi,
+                macd: macd.macd,
+                currentPrice,
+                timeframe,
+                technicalBias,
+                technicalConfidence
+            });
+
+            if (predictions) {
+                mlPrediction = predictions.mlPrediction;
+                detectedPatterns = predictions.detectedPatterns;
+                nextCandlePrediction = predictions.nextCandlePrediction;
+                predictionConsensus = predictions.predictionConsensus;
+            }
+
+            // Multi-timeframe analysis
+            timeframeAlignment = await MultiTimeframeAnalyzer.analyzeTimeframes(
+                pair,
+                marketType,
+                prices
+            );
+
+            // Optional: Boost confidence if predictions align strongly
+            if (predictionConsensus && predictionConsensus.agreement >= 80) {
+                // High agreement between all sources - boost confidence slightly
+                const alignmentBonus = (predictionConsensus.agreement - 80) * 0.1; // Max 2% boost
+                // Only boost if consensus matches our signal direction
+                if (
+                    (predictionConsensus.overallDirection === 'BULLISH' && technicalBias === 'BULLISH') ||
+                    (predictionConsensus.overallDirection === 'BEARISH' && technicalBias === 'BEARISH')
+                ) {
+                    // Note: finalConfidence already calculated, this is informational
+                    console.log(`✅ Prediction consensus confirms ${technicalBias} signal (${predictionConsensus.agreement}% agreement)`);
+                }
+            }
+
+            // Log predictions for monitoring
+            if (mlPrediction && mlPrediction.confidence > 60) {
+                console.log(`🤖 ML Prediction: ${mlPrediction.direction} (${mlPrediction.confidence}% confidence)`);
+            }
+            if (detectedPatterns && detectedPatterns.length > 0) {
+                console.log(`📐 Detected Patterns: ${detectedPatterns.map(p => p.name).join(', ')}`);
+            }
+
+        } catch (error) {
+            console.error('Prediction engine error:', error);
+            // Continue without predictions if there's an error
+        }
 
         // Calculate entry, stop loss, and take profit with improved logic
         const entryPrice = currentPrice;
@@ -306,7 +393,13 @@ export class SignalGenerator {
             technicalAlignment: TechnicalAlignment.STRONG, // Placeholder - will be properly calculated
             validUntil,
             rationalePoints,
-            volumeVsAverage
+            volumeVsAverage,
+            // Predictive AI Fields
+            mlPrediction,
+            detectedPatterns,
+            timeframeAlignment,
+            nextCandlePrediction,
+            predictionConsensus
         };
 
         return signal;
