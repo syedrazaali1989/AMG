@@ -181,7 +181,11 @@ export default function DashboardPage() {
         }
     };
 
-    const stats = SignalGenerator.calculateAccuracy(signals);
+    // Filter signals by selected type for accurate stats
+    const signalsForStats = signals.filter(signal =>
+        selectedType === 'SPOT' ? signal.signalType === SignalType.SPOT : signal.signalType === SignalType.FUTURE
+    );
+    const stats = SignalGenerator.calculateAccuracy(signalsForStats);
 
     return (
         <div className="min-h-screen bg-background">

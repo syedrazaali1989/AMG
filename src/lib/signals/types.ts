@@ -203,6 +203,10 @@ export interface Signal {
   tp1Hit?: boolean;
   tp2Hit?: boolean;
   tp3Hit?: boolean;
+  // Track when each TP was hit
+  tp1HitTime?: Date;
+  tp2HitTime?: Date;
+  tp3HitTime?: Date;
   confidence: number;
   timestamp: Date;
   expiresAt?: Date;

@@ -459,13 +459,22 @@ export class SignalGenerator {
             if (signal.direction === SignalDirection.BUY || signal.direction === SignalDirection.LONG) {
                 // For LONG/BUY: Check partial TPs
                 if (signal.takeProfit1 && highestPrice >= signal.takeProfit1) {
-                    tp1Hit = true;
+                    if (!tp1Hit) {
+                        tp1Hit = true;
+                        signal.tp1HitTime = new Date(); // Record TP1 hit time
+                    }
                 }
                 if (signal.takeProfit2 && highestPrice >= signal.takeProfit2) {
-                    tp2Hit = true;
+                    if (!tp2Hit) {
+                        tp2Hit = true;
+                        signal.tp2HitTime = new Date(); // Record TP2 hit time
+                    }
                 }
                 if (signal.takeProfit3 && highestPrice >= signal.takeProfit3) {
-                    tp3Hit = true;
+                    if (!tp3Hit) {
+                        tp3Hit = true;
+                        signal.tp3HitTime = new Date(); // Record TP3 hit time
+                    }
                 }
 
                 // Check SL and TP
@@ -478,13 +487,22 @@ export class SignalGenerator {
             } else {
                 // For SHORT/SELL: Check partial TPs
                 if (signal.takeProfit1 && lowestPrice <= signal.takeProfit1) {
-                    tp1Hit = true;
+                    if (!tp1Hit) {
+                        tp1Hit = true;
+                        signal.tp1HitTime = new Date(); // Record TP1 hit time
+                    }
                 }
                 if (signal.takeProfit2 && lowestPrice <= signal.takeProfit2) {
-                    tp2Hit = true;
+                    if (!tp2Hit) {
+                        tp2Hit = true;
+                        signal.tp2HitTime = new Date(); // Record TP2 hit time
+                    }
                 }
                 if (signal.takeProfit3 && lowestPrice <= signal.takeProfit3) {
-                    tp3Hit = true;
+                    if (!tp3Hit) {
+                        tp3Hit = true;
+                        signal.tp3HitTime = new Date(); // Record TP3 hit time
+                    }
                 }
 
                 // Check SL and TP

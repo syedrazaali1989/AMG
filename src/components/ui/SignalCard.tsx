@@ -215,6 +215,16 @@ export function SignalCard({ signal, onClick }: SignalCardProps) {
                                 {signal.tp1Hit && <span className="text-success">✓</span>}
                             </div>
                             <div className="font-bold text-xs">{formatPrice(signal.takeProfit1, 5)}</div>
+                            {signal.tp1Hit && signal.tp1HitTime && (
+                                <div className="text-[10px] text-success/70 mt-1">
+                                    Hit: {new Date(signal.tp1HitTime).toLocaleString('en-US', {
+                                        month: 'short',
+                                        day: 'numeric',
+                                        hour: '2-digit',
+                                        minute: '2-digit'
+                                    })}
+                                </div>
+                            )}
                         </div>
                         <div className={cn(
                             "glass-dark rounded-lg p-2 border transition-all",
@@ -225,6 +235,16 @@ export function SignalCard({ signal, onClick }: SignalCardProps) {
                                 {signal.tp2Hit && <span className="text-success">✓</span>}
                             </div>
                             <div className="font-bold text-xs">{formatPrice(signal.takeProfit2, 5)}</div>
+                            {signal.tp2Hit && signal.tp2HitTime && (
+                                <div className="text-[10px] text-success/70 mt-1">
+                                    Hit: {new Date(signal.tp2HitTime).toLocaleString('en-US', {
+                                        month: 'short',
+                                        day: 'numeric',
+                                        hour: '2-digit',
+                                        minute: '2-digit'
+                                    })}
+                                </div>
+                            )}
                         </div>
                         <div className={cn(
                             "glass-dark rounded-lg p-2 border transition-all",
@@ -235,6 +255,16 @@ export function SignalCard({ signal, onClick }: SignalCardProps) {
                                 {signal.tp3Hit && <span className="text-success">✓</span>}
                             </div>
                             <div className="font-bold text-xs">{formatPrice(signal.takeProfit3, 5)}</div>
+                            {signal.tp3Hit && signal.tp3HitTime && (
+                                <div className="text-[10px] text-success/70 mt-1">
+                                    Hit: {new Date(signal.tp3HitTime).toLocaleString('en-US', {
+                                        month: 'short',
+                                        day: 'numeric',
+                                        hour: '2-digit',
+                                        minute: '2-digit'
+                                    })}
+                                </div>
+                            )}
                         </div>
                     </div>
                     <div className="glass-dark rounded-lg p-2 border border-danger/30">
