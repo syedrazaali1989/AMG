@@ -17,6 +17,7 @@ import { AdvancedMarketAnalyzer, MarketAnalysis } from './advancedAnalyzer';
 import { SignalHelpers } from './signalHelpers';
 import { PredictionEngine } from '../ml/predictionEngine';
 import { MultiTimeframeAnalyzer } from '../timeframe/multiTimeframeAnalyzer';
+import { ExchangeAvailability } from './exchangeAvailability';
 
 export class SignalGenerator {
     private static predictionEngineInitialized = false;
@@ -292,6 +293,7 @@ export class SignalGenerator {
             }
         }
 
+
         // Calculate Partial Take Profits (TP1, TP2, TP3)
         let takeProfit1: number;
         let takeProfit2: number;
@@ -299,16 +301,33 @@ export class SignalGenerator {
 
         if (direction === SignalDirection.BUY || direction === SignalDirection.LONG) {
             // For LONG/BUY: TP1 at 10%, TP2 at 50%, TP3 at 100% of the move
-            const tpDistance = takeProfit - entryPrice;
+            let tpDistance = takeProfit - entryPrice;
+
+            // Ensure minimum distance (at least 0.5% of entry price)
+            const minDistance = entryPrice * 0.005; // 0.5% minimum
+            if (tpDistance < minDistance) {
+                tpDistance = minDistance;
+                takeProfit = entryPrice + tpDistance; // Adjust main TP as well
+            }
+
             takeProfit1 = entryPrice + (tpDistance * 0.10); // 10% of move (easier to hit)
             takeProfit2 = entryPrice + (tpDistance * 0.50); // 50% of move
             takeProfit3 = takeProfit; // 100% (final TP)
         } else {
             // For SHORT/SELL: TP1 at 10%, TP2 at 50%, TP3 at 100% of the move
-            const tpDistance = entryPrice - takeProfit;
+            let tpDistance = entryPrice - takeProfit;
+
+            // Ensure minimum distance (at least 0.5% of entry price)
+            const minDistance = entryPrice * 0.005; // 0.5% minimum
+            if (tpDistance < minDistance) {
+                tpDistance = minDistance;
+                takeProfit = entryPrice - tpDistance; // Adjust main TP as well
+            }
+
             takeProfit1 = entryPrice - (tpDistance * 0.10); // 10% of move (easier to hit)
             takeProfit2 = entryPrice - (tpDistance * 0.50); // 50% of move
             takeProfit3 = takeProfit; // 100% (final TP)
+
         }
 
         // Generate signal ID
@@ -351,6 +370,9 @@ export class SignalGenerator {
             marketCondition === MarketCondition.HIGH_VOLATILITY ? 4 : 12;
         validUntil.setHours(validUntil.getHours() + validityHours);
 
+        // Determine which exchanges support this pair
+        const availableExchanges = ExchangeAvailability.getAvailableExchanges(pair, marketType);
+
         const signal: Signal = {
             id,
             marketType,
@@ -360,6 +382,7 @@ export class SignalGenerator {
             pair,
             entryPrice,
             currentPrice,
+            availableExchanges, // Include exchange availability
             stopLoss,
             takeProfit,
             takeProfit1,
@@ -536,6 +559,7 @@ export class SignalGenerator {
 
     /**
      * Generate multiple signals for different pairs
+     * Enhanced with parallel processing for faster loading
      * @param pairs Array of pairs to analyze
      * @param signalType Type of signals to generate
      * @param timeframe Candlestick timeframe for the signals
@@ -546,12 +570,22 @@ export class SignalGenerator {
         signalType: SignalType,
         timeframe: Timeframe = Timeframe.ONE_HOUR
     ): Promise<Signal[]> {
-        const signals: Signal[] = [];
+        // Use Promise.allSettled for parallel processing
+        // This allows all signals to generate simultaneously instead of one-by-one
+        const results = await Promise.allSettled(
+            marketDataList.map(marketData =>
+                this.generateSignal(marketData, signalType, timeframe)
+            )
+        );
 
-        for (const marketData of marketDataList) {
-            const signal = await this.generateSignal(marketData, signalType, timeframe);
-            if (signal) {
-                signals.push(signal);
+        // Filter successful results and extract signals
+        const signals: Signal[] = [];
+        for (const result of results) {
+            if (result.status === 'fulfilled' && result.value) {
+                signals.push(result.value);
+            } else if (result.status === 'rejected') {
+                // Log errors but don't block other signals
+                console.error('Signal generation failed for pair:', result.reason);
             }
         }
 

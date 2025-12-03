@@ -17,6 +17,8 @@ import { motion } from 'framer-motion';
 export default function DashboardPage() {
     const [signals, setSignals] = useState<Signal[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [loadingProgress, setLoadingProgress] = useState(0); // 0-100
+    const [loadingStatus, setLoadingStatus] = useState('Initializing...'); // Status message
     const [selectedMarket, setSelectedMarket] = useState<'CRYPTO' | 'FOREX'>('CRYPTO');
     const [selectedType, setSelectedType] = useState<'SPOT' | 'FUTURE'>('SPOT');
     const [selectedDirections, setSelectedDirections] = useState<SignalDirection[]>(() => {
@@ -81,15 +83,23 @@ export default function DashboardPage() {
 
     const generateSignals = async () => {
         setIsLoading(true);
+        setLoadingProgress(0);
+        setLoadingStatus('Preparing market analysis...');
         // Clear existing signals to prevent TP carry-over
         setSignals([]);
         setNotifications([]);
 
         try {
+            setLoadingProgress(10);
+            setLoadingStatus('Fetching market data...');
+
             const allPairs = MarketDataManager.getAllPairs();
             const filteredPairs = allPairs.filter(({ marketType }) =>
                 selectedMarket === 'CRYPTO' ? marketType === MarketType.CRYPTO : marketType === MarketType.FOREX
             );
+
+            setLoadingProgress(25);
+            setLoadingStatus(`Analyzing ${filteredPairs.length} pairs...`);
 
             const marketDataList = await Promise.all(
                 filteredPairs.map(({ pair, marketType }) =>
@@ -97,11 +107,20 @@ export default function DashboardPage() {
                 )
             );
 
+            setLoadingProgress(50);
+            setLoadingStatus('Running parallel signal generation...');
+
             const signalTypeEnum = selectedType === 'SPOT' ? SignalType.SPOT : SignalType.FUTURE;
             const generatedSignals = await SignalGenerator.generateMultipleSignals(marketDataList, signalTypeEnum);
 
+            setLoadingProgress(90);
+            setLoadingStatus('Finalizing results...');
+
             // Completely replace with fresh signals
             setSignals(generatedSignals);
+
+            setLoadingProgress(100);
+            setLoadingStatus('Complete!');
             setIsLoading(false);
 
             if (generatedSignals.length > 0) {
@@ -121,6 +140,7 @@ export default function DashboardPage() {
             }
         } catch (error) {
             console.error('Error:', error);
+            setLoadingStatus('Error loading signals');
             setIsLoading(false);
         }
     };
@@ -261,8 +281,22 @@ export default function DashboardPage() {
 
                 {isLoading ? (
                     <div className="glass rounded-lg p-12 text-center">
-                        <div className="animate-pulse">
-                            <div className="text-muted-foreground">Loading {selectedMarket} {selectedType} signals...</div>
+                        <div className="space-y-4">
+                            <div className="text-muted-foreground font-medium">{loadingStatus}</div>
+
+                            {/* Progress Bar */}
+                            <div className="w-full max-w-md mx-auto bg-muted/30 rounded-full h-2 overflow-hidden">
+                                <motion.div
+                                    initial={{ width: 0 }}
+                                    animate={{ width: `${loadingProgress}%` }}
+                                    transition={{ duration: 0.3 }}
+                                    className="h-full bg-gradient-primary"
+                                />
+                            </div>
+
+                            <div className="text-sm text-muted-foreground">
+                                {loadingProgress}% complete
+                            </div>
                         </div>
                     </div>
                 ) : (

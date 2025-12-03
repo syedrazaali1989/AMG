@@ -16,6 +16,10 @@ export class NewsAnalyzer {
     private static newsArticlesCache: Map<string, { articles: NewsArticle[]; timestamp: number }> = new Map();
     private static readonly CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
+    // Cache for news impact assessment (used during signal generation)
+    private static newsImpactCache: Map<string, { impact: any; timestamp: number }> = new Map();
+    private static readonly IMPACT_CACHE_DURATION = 2 * 60 * 1000; // 2 minutes
+
     /**
      * Get relevant news keywords for a trading pair
      */
@@ -256,6 +260,12 @@ export class NewsAnalyzer {
         catalyst: 'STRONG_BULLISH' | 'BULLISH' | 'NEUTRAL' | 'BEARISH' | 'STRONG_BEARISH';
         recentNews: NewsEvent[];
     }> {
+        // Check cache first
+        const cached = this.newsImpactCache.get(pair);
+        if (cached && Date.now() - cached.timestamp < this.IMPACT_CACHE_DURATION) {
+            return cached.impact;
+        }
+
         const allNews = await this.getCurrentNews(pair);
 
         // Filter for last 2 hours
@@ -294,11 +304,16 @@ export class NewsAnalyzer {
         else if (aggregateScore <= -1) catalyst = 'BEARISH';
         else catalyst = 'NEUTRAL';
 
-        return {
+        const result = {
             score: aggregateScore,
             catalyst,
             recentNews
         };
+
+        // Cache the result
+        this.newsImpactCache.set(pair, { impact: result, timestamp: Date.now() });
+
+        return result;
     }
 
     /**

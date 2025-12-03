@@ -51,9 +51,17 @@ export function formatVolume(volume: number): string {
     return volume.toFixed(2);
 }
 
-export function formatTimeAgo(date: Date): string {
+export function formatTimeAgo(date: Date | string): string {
     const now = new Date();
-    const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+    // Convert string to Date if needed
+    const dateObj = typeof date === 'string' ? new Date(date) : date;
+
+    // Check if valid date
+    if (isNaN(dateObj.getTime())) {
+        return 'Unknown';
+    }
+
+    const diffInSeconds = Math.floor((now.getTime() - dateObj.getTime()) / 1000);
 
     if (diffInSeconds < 60) return 'Just now';
     if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)}m ago`;

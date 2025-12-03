@@ -76,6 +76,48 @@ export function SignalCard({ signal, onClick }: SignalCardProps) {
                                     {signal.marketType}
                                 </span>
                             </div>
+
+                            {/* Exchange Availability Badges */}
+                            {signal.availableExchanges && signal.availableExchanges.length > 0 && (
+                                <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                                    {signal.availableExchanges.map((exchange, idx) => {
+                                        // Color coding for different exchanges
+                                        const exchangeColors: Record<string, string> = {
+                                            'Binance': 'bg-amber-500/10 text-amber-600 border-amber-500/20',
+                                            'Bybit': 'bg-yellow-500/10 text-yellow-600 border-yellow-500/20',
+                                            'OKX': 'bg-slate-500/10 text-slate-600 border-slate-500/20',
+                                            'KuCoin': 'bg-green-500/10 text-green-600 border-green-500/20',
+                                            'MEXC': 'bg-blue-500/10 text-blue-600 border-blue-500/20',
+                                            'Gate.io': 'bg-cyan-500/10 text-cyan-600 border-cyan-500/20',
+                                            'BingX': 'bg-orange-500/10 text-orange-600 border-orange-500/20',
+                                            'Bitget': 'bg-indigo-500/10 text-indigo-600 border-indigo-500/20',
+                                            'Exness': 'bg-purple-500/10 text-purple-600 border-purple-500/20'
+                                        };
+
+                                        // Find matching color or use default
+                                        let colorClass = 'bg-muted/50 text-muted-foreground border-muted/20';
+                                        for (const [key, value] of Object.entries(exchangeColors)) {
+                                            if (exchange.includes(key)) {
+                                                colorClass = value;
+                                                break;
+                                            }
+                                        }
+
+                                        return (
+                                            <span
+                                                key={idx}
+                                                className={cn(
+                                                    'px-2 py-0.5 rounded-full text-[10px] font-bold border uppercase tracking-wider',
+                                                    colorClass
+                                                )}
+                                            >
+                                                {exchange}
+                                            </span>
+                                        );
+                                    })}
+                                </div>
+                            )}
+
                             <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-0.5">
                                 <span className="text-primary flex items-center gap-1 font-medium">
                                     <span className="relative flex h-2 w-2">

@@ -194,6 +194,7 @@ export interface Signal {
   entryPrice: number;
   currentPrice: number;
   mexcPrice?: number; // Optional price from MEXC for comparison
+  availableExchanges?: string[]; // List of exchanges where this pair is available
   stopLoss: number;
   takeProfit: number;
   // Partial Take Profits
