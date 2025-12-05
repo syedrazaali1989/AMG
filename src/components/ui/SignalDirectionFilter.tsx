@@ -13,7 +13,7 @@ interface SignalDirectionFilterProps {
 export function SignalDirectionFilter({ selectedDirections, onDirectionsChange, signalType }: SignalDirectionFilterProps) {
     const allDirections = [
         { value: SignalDirection.BUY, label: 'BUY', color: 'text-success border-success/30 bg-success/10', type: 'SPOT' },
-        { value: SignalDirection.SELL, label: 'SELL', color: 'text-danger border-danger/30 bg-danger/10', type: 'SPOT' },
+        // SELL removed - SPOT only supports BUY (entry), sell happens automatically at TP
         { value: SignalDirection.LONG, label: 'LONG', color: 'text-success border-success/30 bg-success/10', type: 'FUTURE' },
         { value: SignalDirection.SHORT, label: 'SHORT', color: 'text-danger border-danger/30 bg-danger/10', type: 'FUTURE' },
     ];

@@ -242,6 +242,16 @@ export interface Signal {
   macdValue?: number; // MACD line value
   macdSignal?: number; // MACD signal line value
 
+  // SPOT Signal Enhancements
+  riskLevel?: 'LOW' | 'MODERATE' | 'HIGH';
+  portfolioAllocation?: string; // e.g., "5-8%"
+  holdTimeRecommendation?: string; // e.g., "2-5 days"
+  volumeQuality?: number; // 1-5 stars
+  volumeQualityLabel?: string; // "Excellent", "Very Good", etc.
+  coinStability?: number; // 1-5 stars
+  coinStabilityLabel?: string; // "Most Stable", "Volatile", etc.
+  beginnerTip?: string; // Educational tip for beginners
+
   // ============================================
   // PREDICTIVE AI FIELDS
   // ============================================

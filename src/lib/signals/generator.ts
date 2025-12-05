@@ -18,9 +18,28 @@ import { SignalHelpers } from './signalHelpers';
 import { PredictionEngine } from '../ml/predictionEngine';
 import { MultiTimeframeAnalyzer } from '../timeframe/multiTimeframeAnalyzer';
 import { ExchangeAvailability } from './exchangeAvailability';
+import {
+    calculatePortfolioAllocation,
+    calculateHoldTime,
+    calculateVolumeQuality,
+    getCoinStability,
+    generateBeginnerTip
+} from './spotEnhancements';
+
 
 export class SignalGenerator {
     private static predictionEngineInitialized = false;
+
+    // Trading Profile Constants - Simple Differentiation
+    private static readonly SPOT_PROFILE = {
+        minConfidence: 60,        // SPOT: 60% minimum
+        riskLevel: 'MODERATE' as const
+    };
+
+    private static readonly FUTURES_PROFILE = {
+        minConfidence: 70,        // FUTURES: 70% minimum (stricter)
+        riskLevel: 'HIGH' as const
+    };
 
     /**
      * Initialize prediction engine (call once on app start)
@@ -151,7 +170,11 @@ export class SignalGenerator {
             direction = signalType === SignalType.FUTURE ? SignalDirection.LONG : SignalDirection.BUY;
             technicalConfidence = Math.min(buyScore, 100);
         } else if (sellScore >= threshold && sellScore > buyScore) {
-            direction = signalType === SignalType.FUTURE ? SignalDirection.SHORT : SignalDirection.SELL;
+            // SPOT: Skip SELL signals (only BUY makes sense in spot trading)
+            if (signalType === SignalType.SPOT) {
+                return null; // No SELL signals for SPOT
+            }
+            direction = SignalType.FUTURE ? SignalDirection.SHORT : SignalDirection.SELL;
             technicalConfidence = Math.min(sellScore, 100);
         }
 
@@ -206,10 +229,13 @@ export class SignalGenerator {
             return null; // Reject weak counter-trend signals
         }
 
-        // Reject signals below 60% confidence - BALANCED QUALITY
-        // This ensures good quality signals while allowing reasonable opportunities
-        // Result: 8-12 quality signals with 50-60% TP hit rates
-        if (confidence < 60) return null;
+        // Profile-based confidence threshold
+        const profile = signalType === SignalType.SPOT ? this.SPOT_PROFILE : this.FUTURES_PROFILE;
+
+        // SPOT: 60% minimum, FUTURES: 70% minimum
+        if (confidence < profile.minConfidence) {
+            return null; // Signal doesn't meet quality threshold for this type
+        }
 
         // ============================================
         // PREDICTIVE AI INTEGRATION
@@ -472,6 +498,23 @@ export class SignalGenerator {
             rsi,
             macdValue: macd.macd,
             macdSignal: macd.signal,
+
+            // SPOT Signal Enhancements (only for SPOT signals)
+            ...(signalType === SignalType.SPOT ? {
+                riskLevel: this.SPOT_PROFILE.riskLevel,
+                portfolioAllocation: calculatePortfolioAllocation(confidence),
+                holdTimeRecommendation: calculateHoldTime(entryPrice, takeProfit3),
+                volumeQuality: calculateVolumeQuality(currentVolume, volumeAvg).score,
+                volumeQualityLabel: calculateVolumeQuality(currentVolume, volumeAvg).label,
+                coinStability: getCoinStability(pair).score,
+                coinStabilityLabel: getCoinStability(pair).label,
+                beginnerTip: generateBeginnerTip(
+                    direction === SignalDirection.BUY ? 'BUY' : 'SELL',
+                    rsi,
+                    sentimentScore.overall
+                )
+            } : {}),
+
             // Predictive AI Fields
             mlPrediction,
             detectedPatterns,
