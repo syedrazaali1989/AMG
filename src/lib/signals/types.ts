@@ -236,6 +236,11 @@ export interface Signal {
   validUntil?: Date; // Signal validity timestamp
   rationalePoints?: string[]; // 3-bullet rationale (news + technicals + volume)
   volumeVsAverage?: number; // Current volume as % of average
+  // Technical indicator values for display
+  rsi?: number; // RSI value at entry (0-100)
+  currentRsi?: number; // Current RSI value (updated in real-time)
+  macdValue?: number; // MACD line value
+  macdSignal?: number; // MACD signal line value
 
   // ============================================
   // PREDICTIVE AI FIELDS

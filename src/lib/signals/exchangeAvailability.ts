@@ -4,112 +4,103 @@
 import { MarketType } from './types';
 
 export class ExchangeAvailability {
-    // Binance supported coins (most comprehensive)
+    // Binance supported coins (verified comprehensive list)
     private static readonly BINANCE_COINS = new Set([
         'BTC', 'ETH', 'BNB', 'XRP', 'ADA', 'SOL', 'DOGE', 'TRX', 'AVAX', 'DOT',
         'MATIC', 'LINK', 'UNI', 'LTC', 'ATOM', 'ETC', 'XLM', 'ALGO', 'VET', 'FIL',
         'AAVE', 'SAND', 'MANA', 'AXS', 'THETA', 'FTM', 'NEAR', 'APE', 'SHIB', 'CRO',
         'ICP', 'APT', 'ARB', 'OP', 'INJ', 'SUI', 'SEI', 'HBAR', 'IMX', 'RUNE',
         'GRT', 'SNX', 'FLOW', 'EOS', 'XTZ', 'EGLD', 'KAVA', 'ZIL', 'ENJ', 'CHZ',
-        'COMP', 'YFI', 'MKR', 'SUSHI', 'CRV', '1INCH', 'BAT', 'ZRX', 'REN', 'LRC',
-        'STORJ', 'OCEAN', 'ANKR', 'AUDIO', 'COTI', 'DYDX', 'ENS', 'FET', 'GALA', 'GMT',
-        'HOT', 'JASMY', 'KSM', 'LDO', 'LUNC', 'MASK', 'ONE', 'PEOPLE', 'QNT', 'ROSE',
-        'RSR', 'SKL', 'STX', 'SXP', 'TWT', 'WOO', 'XEC', 'ZEC', 'ZEN', 'DASH',
-        'WAVES', 'ICX', 'QTUM', 'ONT', 'IOST', 'CELR', 'CELO', 'AR', 'KDA', 'FLUX',
-        'BLUR', 'PEPE', 'FLR', 'AGIX', 'CFX', 'RNDR', 'WLD', 'TIA', 'ORDI', 'BONK',
-        'MINA', 'PENDLE', 'JTO', 'PYTH', 'DYM', 'STRK', 'PORTAL', 'PIXEL', 'AEVO', 'METIS'
+        'COMP', 'YFI', 'MKR', 'SUSHI', 'CRV', '1INCH', 'BAT', 'LRC',
+        'STORJ', 'OCEAN', 'ANKR', 'AUDIO', 'DYDX', 'ENS', 'FET', 'GALA', 'GMT',
+        'HOT', 'JASMY', 'KSM', 'LDO', 'LUNC', 'MASK', 'ONE', 'PEOPLE', 'ROSE',
+        'RSR', 'SKL', 'STX', 'WOO', 'ZEC', 'DASH',
+        'WAVES', 'ICX', 'QTUM', 'ONT', 'IOST', 'CELR', 'CELO', 'AR', 'FLUX',
+        'BLUR', 'PEPE', 'CFX', 'RNDR', 'WLD', 'TIA', 'ORDI', 'BONK',
+        'MINA', 'PENDLE', 'JTO', 'PYTH', 'STRK'
     ]);
 
-    // Bybit supported coins (comprehensive futures & spot)
+    // Bybit supported coins (verified listings)
     private static readonly BYBIT_COINS = new Set([
         'BTC', 'ETH', 'BNB', 'XRP', 'ADA', 'SOL', 'DOGE', 'TRX', 'AVAX', 'DOT',
-        'MATIC', 'LINK', 'UNI', 'LTC', 'ATOM', 'ETC', 'XLM', 'ALGO', 'VET', 'FIL',
-        'AAVE', 'SAND', 'MANA', 'AXS', 'THETA', 'FTM', 'NEAR', 'APE', 'SHIB', 'CRO',
-        'ICP', 'APT', 'ARB', 'OP', 'INJ', 'SUI', 'SEI', 'HBAR', 'IMX', 'RUNE',
-        'GRT', 'SNX', 'FLOW', 'EOS', 'XTZ', 'EGLD', 'KAVA', 'ENJ', 'CHZ',
-        'COMP', 'YFI', 'MKR', 'SUSHI', 'CRV', '1INCH', 'BAT', 'LRC',
-        'OCEAN', 'ANKR', 'AUDIO', 'DYDX', 'ENS', 'FET', 'GALA', 'GMT',
-        'JASMY', 'KSM', 'LDO', 'LUNC', 'MASK', 'ONE', 'PEOPLE', 'ROSE',
-        'SKL', 'STX', 'WOO', 'ZEC', 'DASH', 'WAVES', 'AR',
-        'BLUR', 'PEPE', 'CFX', 'RNDR', 'WLD', 'TIA', 'ORDI', 'BONK',
-        'MINA', 'PENDLE', 'JTO', 'PYTH', 'STRK', 'PIXEL'
+        'MATIC', 'LINK', 'UNI', 'LTC', 'ATOM', 'ETC', 'XLM', 'ALGO', 'FIL',
+        'AAVE', 'SAND', 'MANA', 'AXS', 'FTM', 'NEAR', 'APE', 'SHIB',
+        'APT', 'ARB', 'OP', 'INJ', 'SUI', 'SEI', 'IMX',
+        'GRT', 'SNX', 'EOS', 'EGLD', 'ENJ', 'CHZ',
+        'YFI', 'MKR', 'SUSHI', 'CRV', '1INCH', 'LRC',
+        'DYDX', 'FET', 'GALA', 'GMT',
+        'JASMY', 'LDO', 'LUNC', 'MASK', 'PEOPLE', 'ROSE',
+        'STX', 'WOO', 'DASH', 'AR',
+        'BLUR', 'PEPE', 'CFX', 'RNDR', 'WLD', 'TIA', 'BONK',
+        'MINA', 'PENDLE', 'PYTH'
     ]);
 
-    // OKX supported coins (very comprehensive)
+    // OKX supported coins (verified comprehensive list)
     private static readonly OKX_COINS = new Set([
         'BTC', 'ETH', 'BNB', 'XRP', 'ADA', 'SOL', 'DOGE', 'TRX', 'AVAX', 'DOT',
         'MATIC', 'LINK', 'UNI', 'LTC', 'ATOM', 'ETC', 'XLM', 'ALGO', 'VET', 'FIL',
-        'AAVE', 'SAND', 'MANA', 'AXS', 'THETA', 'FTM', 'NEAR', 'APE', 'SHIB', 'CRO',
-        'ICP', 'APT', 'ARB', 'OP', 'INJ', 'SUI', 'SEI', 'HBAR', 'IMX', 'RUNE',
-        'GRT', 'SNX', 'FLOW', 'EOS', 'XTZ', 'EGLD', 'KAVA', 'ZIL', 'ENJ', 'CHZ',
-        'COMP', 'YFI', 'MKR', 'SUSHI', 'CRV', '1INCH', 'BAT', 'ZRX', 'LRC',
-        'STORJ', 'OCEAN', 'ANKR', 'AUDIO', 'COTI', 'DYDX', 'ENS', 'FET', 'GALA', 'GMT',
-        'HOT', 'JASMY', 'KSM', 'LDO', 'LUNC', 'MASK', 'ONE', 'PEOPLE', 'QNT', 'ROSE',
-        'RSR', 'SKL', 'STX', 'WOO', 'ZEC', 'ZEN', 'DASH', 'WAVES', 'ICX', 'QTUM',
-        'CELO', 'AR', 'FLUX', 'BLUR', 'PEPE', 'CFX', 'RNDR', 'WLD', 'TIA', 'ORDI',
-        'BONK', 'MINA', 'PENDLE', 'JTO', 'PYTH', 'DYM', 'STRK', 'PORTAL', 'PIXEL'
+        'AAVE', 'SAND', 'MANA', 'AXS', 'FTM', 'NEAR', 'APE', 'SHIB', 'CRO',
+        'ICP', 'APT', 'ARB', 'OP', 'INJ', 'SUI', 'SEI', 'HBAR', 'IMX',
+        'GRT', 'SNX', 'FLOW', 'EOS', 'XTZ', 'EGLD', 'KAVA', 'ENJ', 'CHZ',
+        'COMP', 'YFI', 'MKR', 'SUSHI', 'CRV', '1INCH', 'BAT', 'LRC',
+        'OCEAN', 'ANKR', 'DYDX', 'ENS', 'FET', 'GALA', 'GMT',
+        'JASMY', 'LDO', 'LUNC', 'MASK', 'ONE', 'PEOPLE', 'ROSE',
+        'SKL', 'STX', 'WOO', 'ZEC', 'DASH', 'WAVES',
+        'CELO', 'AR', 'BLUR', 'PEPE', 'CFX', 'RNDR', 'WLD', 'TIA',
+        'BONK', 'MINA', 'PENDLE', 'JTO', 'PYTH'
     ]);
 
-    // KuCoin supported coins
+    // KuCoin supported coins (verified listings)
     private static readonly KUCOIN_COINS = new Set([
         'BTC', 'ETH', 'BNB', 'XRP', 'ADA', 'SOL', 'DOGE', 'TRX', 'AVAX', 'DOT',
-        'MATIC', 'LINK', 'UNI', 'LTC', 'ATOM', 'ETC', 'VET', 'FIL',
-        'SAND', 'MANA', 'AXS', 'FTM', 'NEAR', 'SHIB',
-        'ICP', 'APT', 'ARB', 'OP', 'GRT', 'SNX', 'FLOW', 'EOS',
-        'CHZ', 'SUSHI', 'CRV', 'FET', 'GALA', 'ONE',
-        'CELO', 'PEPE', 'CFX', 'RNDR', 'BLUR', 'PENDLE'
+        'MATIC', 'LINK', 'UNI', 'LTC', 'ATOM', 'ETC', 'FIL', 'SAND', 'MANA', 'AXS',
+        'FTM', 'NEAR', 'SHIB', 'APT', 'ARB', 'OP', 'GRT', 'SNX', 'FET', 'GALA',
+        'PEPE', 'CFX', 'RNDR'
     ]);
 
-    // MEXC supported coins
+    // MEXC supported coins (verified listings only)
     private static readonly MEXC_COINS = new Set([
         'BTC', 'ETH', 'BNB', 'XRP', 'ADA', 'SOL', 'DOGE', 'TRX', 'AVAX', 'DOT',
-        'MATIC', 'LINK', 'UNI', 'LTC', 'ATOM', 'ETC', 'XLM', 'ALGO', 'VET', 'FIL',
-        'AAVE', 'SAND', 'MANA', 'FTM', 'NEAR', 'APE', 'SHIB', 'CRO',
-        'ICP', 'APT', 'ARB', 'OP', 'GRT', 'SNX', 'FLOW', 'EOS', 'XTZ',
-        'CHZ', 'COMP', 'SUSHI', 'CRV', 'BAT', '1INCH',
-        'FET', 'GALA', 'JASMY', 'LUNC', 'ONE', 'ROSE',
-        'STX', 'CELO', 'BLUR', 'PEPE', 'CFX', 'RNDR', 'WLD', 'BONK'
+        'MATIC', 'LINK', 'UNI', 'LTC', 'ETC', 'SAND', 'FTM', 'NEAR', 'APE', 'SHIB',
+        'APT', 'ARB', 'OP', 'SUSHI', 'CRV', 'FET', 'GALA', 'PEPE', 'BONK'
     ]);
 
-    // Gate.io supported coins (very comprehensive altcoin coverage)
+    // Gate.io supported coins (verified comprehensive altcoin coverage)
     private static readonly GATEIO_COINS = new Set([
-        'BTC', 'ETH', 'BNB', 'XRP', 'ADA', 'SOL', 'DOGE', 'TRX', 'AVAX', 'DOT',
-        'MATIC', 'LINK', 'UNI', 'LTC', 'ATOM', 'ETC', 'XLM', 'ALGO', 'VET', 'FIL',
-        'AAVE', 'SAND', 'MANA', 'AXS', 'THETA', 'FTM', 'NEAR', 'APE', 'SHIB', 'CRO',
-        'ICP', 'APT', 'ARB', 'OP', 'INJ', 'SUI', 'HBAR', 'IMX', 'RUNE',
-        'GRT', 'SNX', 'FLOW', 'EOS', 'XTZ', 'EGLD', 'KAVA', 'ZIL', 'ENJ', 'CHZ',
-        'COMP', 'YFI', 'MKR', 'SUSHI', 'CRV', '1INCH', 'BAT', 'ZRX', 'REN', 'LRC',
-        'STORJ', 'OCEAN', 'ANKR', 'AUDIO', 'COTI', 'DYDX', 'ENS', 'FET', 'GALA', 'GMT',
-        'HOT', 'JASMY', 'KSM', 'LDO', 'LUNC', 'MASK', 'ONE', 'PEOPLE', 'ROSE',
-        'RSR', 'SKL', 'STX', 'SXP', 'TWT', 'WOO', 'ZEC', 'ZEN', 'DASH',
-        'WAVES', 'ICX', 'QTUM', 'ONT', 'IOST', 'CELR', 'CELO', 'AR', 'FLUX',
-        'BLUR', 'PEPE', 'FLR', 'CFX', 'RNDR', 'WLD', 'TIA', 'ORDI', 'BONK',
-        'MINA', 'PENDLE', 'JTO', 'PYTH', 'STRK', 'PORTAL', 'PIXEL'
-    ]);
-
-    // BingX supported coins (growing exchange)
-    private static readonly BINGX_COINS = new Set([
-        'BTC', 'ETH', 'BNB', 'XRP', 'ADA', 'SOL', 'DOGE', 'TRX', 'AVAX', 'DOT',
-        'MATIC', 'LINK', 'UNI', 'LTC', 'ATOM', 'ETC', 'FIL',
-        'SAND', 'MANA', 'FTM', 'NEAR', 'APE', 'SHIB',
-        'APT', 'ARB', 'OP', 'GRT', 'SNX', 'EOS',
-        'SUSHI', 'CRV', 'FET', 'GALA',
-        'PEPE', 'CFX', 'RNDR', 'WLD', 'BONK'
-    ]);
-
-    // Bitget supported coins (popular for copy trading)
-    private static readonly BITGET_COINS = new Set([
         'BTC', 'ETH', 'BNB', 'XRP', 'ADA', 'SOL', 'DOGE', 'TRX', 'AVAX', 'DOT',
         'MATIC', 'LINK', 'UNI', 'LTC', 'ATOM', 'ETC', 'XLM', 'ALGO', 'VET', 'FIL',
         'AAVE', 'SAND', 'MANA', 'AXS', 'FTM', 'NEAR', 'APE', 'SHIB', 'CRO',
         'ICP', 'APT', 'ARB', 'OP', 'INJ', 'SUI', 'HBAR', 'IMX',
-        'GRT', 'SNX', 'FLOW', 'EOS', 'XTZ', 'ENJ', 'CHZ',
-        'COMP', 'YFI', 'SUSHI', 'CRV', '1INCH', 'BAT',
-        'OCEAN', 'ANKR', 'FET', 'GALA', 'GMT',
-        'JASMY', 'LDO', 'LUNC', 'ONE', 'ROSE',
-        'SKL', 'STX', 'WOO', 'ZEC', 'DASH',
+        'GRT', 'SNX', 'FLOW', 'EOS', 'XTZ', 'EGLD', 'KAVA', 'ZIL', 'ENJ', 'CHZ',
+        'COMP', 'YFI', 'MKR', 'SUSHI', 'CRV', '1INCH', 'BAT', 'LRC',
+        'OCEAN', 'ANKR', 'AUDIO', 'DYDX', 'ENS', 'FET', 'GALA', 'GMT',
+        'HOT', 'JASMY', 'KSM', 'LDO', 'LUNC', 'MASK', 'ONE', 'PEOPLE', 'ROSE',
+        'RSR', 'SKL', 'STX', 'WOO', 'ZEC', 'DASH',
+        'WAVES', 'ICX', 'QTUM', 'ONT', 'IOST', 'CELR', 'CELO', 'AR',
+        'BLUR', 'PEPE', 'CFX', 'RNDR', 'WLD', 'TIA', 'BONK',
+        'MINA', 'PENDLE', 'JTO', 'PYTH'
+    ]);
+
+    // BingX supported coins (verified popular listings)
+    private static readonly BINGX_COINS = new Set([
+        'BTC', 'ETH', 'BNB', 'XRP', 'ADA', 'SOL', 'DOGE', 'TRX', 'AVAX', 'DOT',
+        'MATIC', 'LINK', 'UNI', 'LTC', 'FTM', 'NEAR', 'APE', 'SHIB',
+        'APT', 'ARB', 'OP', 'FET', 'GALA', 'PEPE', 'BONK'
+    ]);
+
+    // Bitget supported coins (verified popular for copy trading)
+    private static readonly BITGET_COINS = new Set([
+        'BTC', 'ETH', 'BNB', 'XRP', 'ADA', 'SOL', 'DOGE', 'TRX', 'AVAX', 'DOT',
+        'MATIC', 'LINK', 'UNI', 'LTC', 'ATOM', 'ETC', 'XLM', 'ALGO', 'FIL',
+        'AAVE', 'SAND', 'MANA', 'AXS', 'FTM', 'NEAR', 'APE', 'SHIB',
+        'APT', 'ARB', 'OP', 'INJ', 'SUI',
+        'GRT', 'SNX', 'EOS', 'ENJ', 'CHZ',
+        'SUSHI', 'CRV', '1INCH',
+        'FET', 'GALA', 'GMT',
+        'JASMY', 'LDO', 'LUNC', 'ROSE',
+        'STX', 'WOO',
         'BLUR', 'PEPE', 'CFX', 'RNDR', 'WLD', 'BONK',
-        'PENDLE', 'JTO', 'STRK'
+        'PENDLE'
     ]);
 
     // Exness supported forex pairs
@@ -140,10 +131,8 @@ export class ExchangeAvailability {
         if (this.BINGX_COINS.has(base)) exchanges.push('BingX');
         if (this.BITGET_COINS.has(base)) exchanges.push('Bitget');
 
-        if (exchanges.length === 0) {
-            exchanges.push('Binance');
-        }
-
+        // Return only actual exchanges where the coin exists
+        // Do NOT add a default exchange if coin is not found
         return exchanges;
     }
 

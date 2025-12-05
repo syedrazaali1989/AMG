@@ -203,7 +203,55 @@ export function SignalCard({ signal, onClick }: SignalCardProps) {
                 </div>
             </div>
 
-
+            {/* RSI Indicator - Entry vs Current */}
+            {signal.rsi !== undefined && (
+                <div className="mb-3">
+                    <div className="flex items-center justify-between text-xs mb-1">
+                        <span className="text-muted-foreground">RSI (Relative Strength)</span>
+                        <div className="flex items-center gap-2">
+                            <span className="text-[10px] text-muted-foreground">
+                                Entry: <span className={cn(
+                                    "font-semibold",
+                                    signal.rsi < 30 ? 'text-green-500/70' :
+                                        signal.rsi > 70 ? 'text-red-500/70' : 'text-blue-500/70'
+                                )}>{Math.round(signal.rsi)}</span>
+                            </span>
+                            <span className="text-muted-foreground">→</span>
+                            <span className="text-[10px] text-muted-foreground">
+                                Current: <span className={cn(
+                                    "font-bold text-sm",
+                                    (signal.currentRsi || signal.rsi) < 30 ? 'text-green-500' :
+                                        (signal.currentRsi || signal.rsi) > 70 ? 'text-red-500' : 'text-blue-500'
+                                )}>{Math.round(signal.currentRsi || signal.rsi)}</span>
+                            </span>
+                        </div>
+                    </div>
+                    <div className="relative h-3 bg-gradient-to-r from-green-500 via-blue-500 to-red-500 rounded-full overflow-hidden opacity-30">
+                        {/* Zone markers */}
+                        <div className="absolute left-[30%] top-0 bottom-0 w-px bg-white/50" />
+                        <div className="absolute left-[70%] top-0 bottom-0 w-px bg-white/50" />
+                    </div>
+                    <div className="relative h-3 -mt-3">
+                        <motion.div
+                            initial={{ left: `${signal.rsi}%` }}
+                            animate={{ left: `${signal.currentRsi || signal.rsi}%` }}
+                            transition={{ duration: 1, ease: 'easeOut' }}
+                            className="absolute top-0 bottom-0 -ml-1"
+                        >
+                            <div className={cn(
+                                "w-2 h-full rounded-full border-2 border-white shadow-lg",
+                                (signal.currentRsi || signal.rsi) < 30 ? 'bg-green-500' :
+                                    (signal.currentRsi || signal.rsi) > 70 ? 'bg-red-500' : 'bg-blue-500'
+                            )} />
+                        </motion.div>
+                    </div>
+                    <div className="flex justify-between text-[9px] text-muted-foreground mt-0.5">
+                        <span>Oversold</span>
+                        <span>Neutral</span>
+                        <span>Overbought</span>
+                    </div>
+                </div>
+            )}
             {/* Price Information */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
                 <div className="glass-dark rounded-lg p-2">

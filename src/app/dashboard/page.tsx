@@ -157,44 +157,61 @@ export default function DashboardPage() {
                 const binancePrices = binanceResult.status === 'fulfilled' ? binanceResult.value : new Map<string, number>();
                 const mexcPrices = mexcResult.status === 'fulfilled' ? mexcResult.value : new Map<string, number>();
 
-                setSignals(prevSignals => {
-                    return prevSignals.map(signal => {
-                        let newPrice = signal.currentPrice;
-                        let mexcPrice = signal.mexcPrice;
+                const updatedSignalsPromises = signals.map(async signal => {
+                    let newPrice = signal.currentPrice;
+                    let mexcPrice = signal.mexcPrice;
+                    let currentRsi = signal.rsi; // Default to entry RSI
 
-                        if (signal.marketType === MarketType.CRYPTO) {
-                            const binanceSymbol = signal.pair.replace('/', '');
-                            const realPrice = binancePrices.get(binanceSymbol);
-                            const realMexcPrice = mexcPrices.get(binanceSymbol);
-                            if (realPrice) newPrice = realPrice;
-                            if (realMexcPrice) mexcPrice = realMexcPrice;
-                        } else {
-                            const change = (Math.random() - 0.5) * 0.001;
-                            newPrice = signal.currentPrice * (1 + change);
-                        }
+                    if (signal.marketType === MarketType.CRYPTO) {
+                        const binanceSymbol = signal.pair.replace('/', '');
+                        const realPrice = binancePrices.get(binanceSymbol);
+                        const realMexcPrice = mexcPrices.get(binanceSymbol);
+                        if (realPrice) newPrice = realPrice;
+                        if (realMexcPrice) mexcPrice = realMexcPrice;
 
-                        const updatedSignal = SignalGenerator.updateSignal(signal, newPrice);
-
-                        // Check if signal just completed (TP hit)
-                        if (updatedSignal.status === 'COMPLETED' && signal.status !== 'COMPLETED') {
-                            // Save to completed signals in localStorage
-                            const completedSignals = JSON.parse(localStorage.getItem('completedSignals') || '[]');
-                            completedSignals.push({
-                                ...updatedSignal,
-                                completedAt: new Date().toISOString()
-                            });
-                            localStorage.setItem('completedSignals', JSON.stringify(completedSignals));
-
-                            // Show notification
-                            showSuccess(
-                                `🎯 TP Hit: ${signal.pair}`,
-                                `Profit: ${updatedSignal.profitLossPercentage?.toFixed(2)}%`
+                        // Fetch recent data to calculate current RSI
+                        try {
+                            const recentData = await MarketDataManager.generateMarketData(
+                                signal.pair,
+                                signal.marketType,
+                                30 // Get 30 candles for RSI calculation
                             );
+                            // Calculate current RSI from fresh data
+                            const freshRsi = SignalGenerator.calculateCurrentRSI(recentData.prices);
+                            if (freshRsi) currentRsi = freshRsi;
+                        } catch (error) {
+                            // If fetch fails, keep entry RSI
+                            console.error(`Failed to fetch RSI for ${signal.pair}:`, error);
                         }
+                    } else {
+                        const change = (Math.random() - 0.5) * 0.001;
+                        newPrice = signal.currentPrice * (1 + change);
+                    }
 
-                        return { ...updatedSignal, mexcPrice };
-                    });
+                    const updatedSignal = SignalGenerator.updateSignal(signal, newPrice);
+
+                    // Check if signal just completed (TP hit)
+                    if (updatedSignal.status === 'COMPLETED' && signal.status !== 'COMPLETED') {
+                        // Save to completed signals in localStorage
+                        const completedSignals = JSON.parse(localStorage.getItem('completedSignals') || '[]');
+                        completedSignals.push({
+                            ...updatedSignal,
+                            completedAt: new Date().toISOString()
+                        });
+                        localStorage.setItem('completedSignals', JSON.stringify(completedSignals));
+
+                        // Show notification
+                        showSuccess(
+                            `🎯 TP Hit: ${signal.pair}`,
+                            `Profit: ${updatedSignal.profitLossPercentage?.toFixed(2)}%`
+                        );
+                    }
+
+                    return { ...updatedSignal, mexcPrice, currentRsi };
                 });
+
+                const updatedSignals = await Promise.all(updatedSignalsPromises);
+                setSignals(updatedSignals);
             }
         } catch (error) {
             console.error('Price update error:', error);
