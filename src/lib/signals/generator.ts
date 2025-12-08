@@ -37,7 +37,7 @@ export class SignalGenerator {
     };
 
     private static readonly FUTURES_PROFILE = {
-        minConfidence: 70,        // FUTURES: 70% minimum (stricter)
+        minConfidence: 65,        // FUTURES: 65% minimum (balanced for both LONG and SHORT)
         riskLevel: 'HIGH' as const
     };
 
@@ -149,7 +149,7 @@ export class SignalGenerator {
         if (currentPrice > ema9 && currentPrice > ema21) buyScore += 10;
         else if (currentPrice < ema9 && currentPrice < ema21) sellScore += 10;
 
-        // === SAFETY CHECK: Prevent Falling Knife ===
+        // === SAFETY CHECK: Prevent Falling Knife & Rising Rocket ===
         // If strong downward momentum, DON'T give reversal LONG signals
         if (momentum < -2.5 && roc < -4) {
             // Falling knife detected - remove reversal buy signals
@@ -158,23 +158,31 @@ export class SignalGenerator {
             }
         }
 
+        // If strong upward momentum, DON'T give reversal SHORT signals (SYMMETRIC CHECK)
+        if (momentum > 2.5 && roc > 4) {
+            // Rising rocket detected - remove reversal sell signals
+            if (rsi > 60) {
+                sellScore = Math.max(0, sellScore - 30); // Reduce sell score significantly
+            }
+        }
+
         // Determine if signal is strong enough
-        // Initial threshold is lower, final 60% confidence check ensures quality
-        // SELL/SHORT threshold: 50 (allow bearish signals)
-        // BUY/LONG threshold: 52 (require slightly more confirmation)
-        const threshold = 50;
+        // Equal thresholds for balanced LONG/SHORT signal generation
+        // Both BUY and SELL require 50 points minimum
+        const BUY_THRESHOLD = 50;   // Equal to SELL (was 52, caused bias)
+        const SELL_THRESHOLD = 50;  // Both directions treated equally
         let direction: SignalDirection | null = null;
         let technicalConfidence = 0;
 
-        if (buyScore >= 52 && buyScore > sellScore) {
+        if (buyScore >= BUY_THRESHOLD && buyScore > sellScore) {
             direction = signalType === SignalType.FUTURE ? SignalDirection.LONG : SignalDirection.BUY;
             technicalConfidence = Math.min(buyScore, 100);
-        } else if (sellScore >= threshold && sellScore > buyScore) {
+        } else if (sellScore >= SELL_THRESHOLD && sellScore > buyScore) {
             // SPOT: Skip SELL signals (only BUY makes sense in spot trading)
             if (signalType === SignalType.SPOT) {
                 return null; // No SELL signals for SPOT
             }
-            direction = SignalType.FUTURE ? SignalDirection.SHORT : SignalDirection.SELL;
+            direction = signalType === SignalType.FUTURE ? SignalDirection.SHORT : SignalDirection.SELL;
             technicalConfidence = Math.min(sellScore, 100);
         }
 

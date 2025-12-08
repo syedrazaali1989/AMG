@@ -5,8 +5,8 @@ import { Navbar } from '@/components/layout/Navbar';
 import { SignalList } from '@/components/ui/SignalList';
 import { StatsCard } from '@/components/ui/StatsCard';
 import { MessageBox, useMessages } from '@/components/ui/MessageBox';
-// SignalDirectionFilter removed - not needed as SPOT only has BUY
 import { ConfidenceFilter, ConfidenceLevel, filterSignalsByConfidence } from '@/components/ui/ConfidenceFilter';
+import { SignalDirectionFilter } from '@/components/ui/SignalDirectionFilter';
 import { SignalNotifications, SignalNotification } from '@/components/ui/SignalNotifications';
 import { Signal, SignalType, MarketType, SignalDirection } from '@/lib/signals/types';
 import { SignalGenerator } from '@/lib/signals/generator';
@@ -21,7 +21,14 @@ export default function DashboardPage() {
     const [loadingStatus, setLoadingStatus] = useState('Initializing...'); // Status message
     const [selectedMarket, setSelectedMarket] = useState<'CRYPTO' | 'FOREX'>('CRYPTO');
     const [selectedType, setSelectedType] = useState<'SPOT' | 'FUTURE'>('SPOT');
-    // selectedDirections state removed - not needed anymore
+    const [selectedDirections, setSelectedDirections] = useState<SignalDirection[]>(() => {
+        if (typeof window !== 'undefined') {
+            const saved = localStorage.getItem('selectedDirections');
+            if (saved) return JSON.parse(saved) as SignalDirection[];
+        }
+        // Default: BUY for SPOT, LONG/SHORT for FUTURE
+        return [SignalDirection.BUY];
+    });
     const [selectedConfidence, setSelectedConfidence] = useState<ConfidenceLevel>(() => {
         if (typeof window !== 'undefined') {
             const saved = localStorage.getItem('selectedConfidence');
@@ -36,17 +43,32 @@ export default function DashboardPage() {
         setNotifications(prev => prev.filter(n => n.id !== id));
     }, []);
 
-    // selectedDirections localStorage removed
+    // Save selected directions to localStorage
+    useEffect(() => {
+        localStorage.setItem('selectedDirections', JSON.stringify(selectedDirections));
+    }, [selectedDirections]);
 
     // Save selected confidence to localStorage
     useEffect(() => {
         localStorage.setItem('selectedConfidence', selectedConfidence);
     }, [selectedConfidence]);
 
-    // selectedDirections auto-adjust removed
+    // Auto-adjust selected directions when signal type changes
+    useEffect(() => {
+        if (selectedType === 'SPOT') {
+            // SPOT: Only BUY available
+            setSelectedDirections([SignalDirection.BUY]);
+        } else {
+            // FUTURE: LONG and SHORT available
+            setSelectedDirections([SignalDirection.LONG, SignalDirection.SHORT]);
+        }
+    }, [selectedType]);
 
-    // Apply confidence filter only
-    const filteredSignals = filterSignalsByConfidence(signals, selectedConfidence);
+    // Apply confidence and direction filters
+    const confidenceFilteredSignals = filterSignalsByConfidence(signals, selectedConfidence);
+    const filteredSignals = confidenceFilteredSignals.filter(signal =>
+        selectedDirections.includes(signal.direction)
+    );
 
     useEffect(() => {
         generateSignals();
@@ -329,7 +351,11 @@ export default function DashboardPage() {
                                     selectedConfidence={selectedConfidence}
                                     onConfidenceChange={setSelectedConfidence}
                                 />
-                                {/* SignalDirectionFilter removed - SPOT only has BUY, FUTURES has both */}
+                                <SignalDirectionFilter
+                                    selectedDirections={selectedDirections}
+                                    onDirectionsChange={setSelectedDirections}
+                                    signalType={selectedType}
+                                />
                             </div>
                         </div>
 
