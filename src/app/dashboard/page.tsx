@@ -16,11 +16,11 @@ import { motion } from 'framer-motion';
 
 export default function DashboardPage() {
     const [signals, setSignals] = useState<Signal[]>([]);
-    const [isLoading, setIsLoading] = useState(true);
+    const [isLoading, setIsLoading] = useState(false);
     const [loadingProgress, setLoadingProgress] = useState(0); // 0-100
     const [loadingStatus, setLoadingStatus] = useState('Initializing...'); // Status message
-    const [selectedMarket, setSelectedMarket] = useState<'CRYPTO' | 'FOREX'>('CRYPTO');
-    const [selectedType, setSelectedType] = useState<'SPOT' | 'FUTURE'>('SPOT');
+    const [selectedMarket, setSelectedMarket] = useState<'CRYPTO' | 'FOREX' | null>(null);
+    const [selectedType, setSelectedType] = useState<'SPOT' | 'FUTURE' | null>(null);
     const [selectedDirections, setSelectedDirections] = useState<SignalDirection[]>(() => {
         if (typeof window !== 'undefined') {
             const saved = localStorage.getItem('selectedDirections');
@@ -70,24 +70,137 @@ export default function DashboardPage() {
         selectedDirections.includes(signal.direction)
     );
 
-    useEffect(() => {
-        generateSignals();
-        showInfo(
-            `${selectedMarket} ${selectedType} Signals`,
-            'Viewing live signals with 75%+ accuracy'
-        );
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [selectedMarket, selectedType]);
+    // Only auto-adjust directions when type changes, don't auto-load signals
+    // Signals will only load when user explicitly selects the trading type
 
+
+    // Define updateSignalPrices function BEFORE useEffect that uses it
+    const updateSignalPrices = useCallback(async () => {
+        try {
+            // Use functional form to get current signals without adding to dependencies
+            setSignals(currentSignals => {
+                const cryptoSignals = currentSignals.filter(s => s.marketType === MarketType.CRYPTO);
+
+                if (cryptoSignals.length === 0) {
+                    return currentSignals; // No crypto signals, no update needed
+                }
+
+                // Fetch prices asynchronously and update
+                (async () => {
+                    try {
+                        // Use backend proxy instead of direct Binance API (no CORS!)
+                        const response = await fetch('/api/binance/prices');
+
+                        if (!response.ok) {
+                            console.error('Failed to fetch prices from proxy');
+                            return;
+                        }
+
+                        const data = await response.json();
+                        const binancePrices = new Map<string, number>();
+
+                        // Convert prices object to Map
+                        for (const [symbol, price] of Object.entries(data.prices)) {
+                            binancePrices.set(symbol, price as number);
+                        }
+
+                        // Get MEXC prices (fallback)
+                        const mexcResult = await Promise.allSettled([
+                            MarketDataManager.getAllMexcPrices()
+                        ]);
+                        const mexcPrices = mexcResult[0].status === 'fulfilled' ? mexcResult[0].value : new Map<string, number>();
+
+                        // Update signals with new prices
+                        setSignals(prevSignals => {
+                            const updatedSignalsPromises = prevSignals.map(async signal => {
+                                let newPrice = signal.currentPrice;
+                                let mexcPrice = signal.mexcPrice;
+                                let currentRsi = signal.rsi;
+
+                                if (signal.marketType === MarketType.CRYPTO) {
+                                    const binanceSymbol = signal.pair.replace('/', '');
+                                    const realPrice = binancePrices.get(binanceSymbol);
+                                    const realMexcPrice = mexcPrices.get(binanceSymbol);
+                                    if (realPrice) newPrice = realPrice;
+                                    if (realMexcPrice) mexcPrice = realMexcPrice;
+
+                                    try {
+                                        const recentData = await MarketDataManager.generateMarketData(
+                                            signal.pair,
+                                            signal.marketType,
+                                            30
+                                        );
+                                        const freshRsi = SignalGenerator.calculateCurrentRSI(recentData.prices);
+                                        if (freshRsi) currentRsi = freshRsi;
+                                    } catch (error) {
+                                        console.error(`Failed to fetch RSI for ${signal.pair}:`, error);
+                                    }
+                                } else {
+                                    const change = (Math.random() - 0.5) * 0.001;
+                                    newPrice = signal.currentPrice * (1 + change);
+                                }
+
+                                const updatedSignal = SignalGenerator.updateSignal(signal, newPrice);
+
+                                if (updatedSignal.status === 'COMPLETED' && signal.status !== 'COMPLETED') {
+                                    const completedSignals = JSON.parse(localStorage.getItem('completedSignals') || '[]');
+                                    completedSignals.push({
+                                        ...updatedSignal,
+                                        completedAt: new Date().toISOString()
+                                    });
+                                    localStorage.setItem('completedSignals', JSON.stringify(completedSignals));
+
+                                    showSuccess(
+                                        `🎯 TP Hit: ${signal.pair}`,
+                                        `Profit: ${updatedSignal.profitLossPercentage?.toFixed(2)}%`
+                                    );
+                                }
+
+                                return { ...updatedSignal, mexcPrice, currentRsi };
+                            });
+
+                            Promise.all(updatedSignalsPromises).then(updatedSignals => {
+                                setSignals(updatedSignals);
+                            });
+
+                            return prevSignals; // Return current until async completes
+                        });
+                    } catch (error) {
+                        console.error('Price update error:', error);
+                    }
+                })();
+
+                return currentSignals; // Return current signals immediately
+            });
+        } catch (error) {
+            console.error('Price update error:', error);
+        }
+    }, [showSuccess]); // Only showSuccess in dependencies, NOT signals
+
+    // Price update interval - runs every 2 seconds
     useEffect(() => {
         if (signals.length === 0) return;
+
+        console.log('🔄 Starting price updates every 2 seconds...');
+
+        // Update prices every 2 seconds using backend proxy
         const interval = setInterval(() => {
+            console.log('📊 Updating prices...');
             updateSignalPrices();
-        }, 5000);
-        return () => clearInterval(interval);
-    }, [signals.length]);
+        }, 2000); // 2 seconds
+
+        return () => {
+            console.log('🛑 Stopping price updates');
+            clearInterval(interval);
+        };
+    }, [signals.length, updateSignalPrices]);
 
     const generateSignals = async () => {
+        // Don't generate if no market or type selected
+        if (!selectedMarket || !selectedType) {
+            return;
+        }
+
         setIsLoading(true);
         setLoadingProgress(0);
         setLoadingStatus('Preparing market analysis...');
@@ -151,84 +264,14 @@ export default function DashboardPage() {
         }
     };
 
-    const updateSignalPrices = async () => {
-        try {
-            const cryptoSignals = signals.filter(s => s.marketType === MarketType.CRYPTO);
-            if (cryptoSignals.length > 0) {
-                const [binanceResult, mexcResult] = await Promise.allSettled([
-                    MarketDataManager.getAllCryptoPrices(),
-                    MarketDataManager.getAllMexcPrices()
-                ]);
-
-                const binancePrices = binanceResult.status === 'fulfilled' ? binanceResult.value : new Map<string, number>();
-                const mexcPrices = mexcResult.status === 'fulfilled' ? mexcResult.value : new Map<string, number>();
-
-                const updatedSignalsPromises = signals.map(async signal => {
-                    let newPrice = signal.currentPrice;
-                    let mexcPrice = signal.mexcPrice;
-                    let currentRsi = signal.rsi; // Default to entry RSI
-
-                    if (signal.marketType === MarketType.CRYPTO) {
-                        const binanceSymbol = signal.pair.replace('/', '');
-                        const realPrice = binancePrices.get(binanceSymbol);
-                        const realMexcPrice = mexcPrices.get(binanceSymbol);
-                        if (realPrice) newPrice = realPrice;
-                        if (realMexcPrice) mexcPrice = realMexcPrice;
-
-                        // Fetch recent data to calculate current RSI
-                        try {
-                            const recentData = await MarketDataManager.generateMarketData(
-                                signal.pair,
-                                signal.marketType,
-                                30 // Get 30 candles for RSI calculation
-                            );
-                            // Calculate current RSI from fresh data
-                            const freshRsi = SignalGenerator.calculateCurrentRSI(recentData.prices);
-                            if (freshRsi) currentRsi = freshRsi;
-                        } catch (error) {
-                            // If fetch fails, keep entry RSI
-                            console.error(`Failed to fetch RSI for ${signal.pair}:`, error);
-                        }
-                    } else {
-                        const change = (Math.random() - 0.5) * 0.001;
-                        newPrice = signal.currentPrice * (1 + change);
-                    }
-
-                    const updatedSignal = SignalGenerator.updateSignal(signal, newPrice);
-
-                    // Check if signal just completed (TP hit)
-                    if (updatedSignal.status === 'COMPLETED' && signal.status !== 'COMPLETED') {
-                        // Save to completed signals in localStorage
-                        const completedSignals = JSON.parse(localStorage.getItem('completedSignals') || '[]');
-                        completedSignals.push({
-                            ...updatedSignal,
-                            completedAt: new Date().toISOString()
-                        });
-                        localStorage.setItem('completedSignals', JSON.stringify(completedSignals));
-
-                        // Show notification
-                        showSuccess(
-                            `🎯 TP Hit: ${signal.pair}`,
-                            `Profit: ${updatedSignal.profitLossPercentage?.toFixed(2)}%`
-                        );
-                    }
-
-                    return { ...updatedSignal, mexcPrice, currentRsi };
-                });
-
-                const updatedSignals = await Promise.all(updatedSignalsPromises);
-                setSignals(updatedSignals);
-            }
-        } catch (error) {
-            console.error('Price update error:', error);
-        }
-    };
 
     // Filter signals by selected type for accurate stats
-    const signalsForStats = signals.filter(signal =>
+    const signalsForStats = selectedType ? signals.filter(signal =>
         selectedType === 'SPOT' ? signal.signalType === SignalType.SPOT : signal.signalType === SignalType.FUTURE
-    );
-    const stats = SignalGenerator.calculateAccuracy(signalsForStats);
+    ) : [];
+
+    // Apply direction filter to stats as well (so Total Signals reflects filter)
+    const stats = SignalGenerator.calculateAccuracy(filteredSignals);
 
     return (
         <div className="min-h-screen bg-background">
@@ -243,19 +286,39 @@ export default function DashboardPage() {
                             <p className="text-muted-foreground">Real-time signals with 75%+ accuracy</p>
                         </div>
 
+                        {/* Step 1: Select Market Type */}
                         <div>
-                            <p className="text-sm text-muted-foreground mb-2">Select Market</p>
+                            <p className="text-sm text-muted-foreground mb-2">Step 1: Select Market</p>
                             <div className="flex gap-2 glass rounded-lg p-1 w-fit">
                                 <button
-                                    onClick={() => { setSelectedMarket('CRYPTO'); setSignals([]); setIsLoading(true); }}
-                                    className={`px-6 py-3 rounded-lg font-bold transition-all ${selectedMarket === 'CRYPTO' ? 'bg-gradient-primary text-white shadow-lg' : 'text-muted-foreground hover:text-foreground'
+                                    onClick={() => {
+                                        setSelectedMarket('CRYPTO');
+                                        setSelectedType(null);
+                                        setSignals([]);
+                                        setIsLoading(false);
+                                    }}
+                                    className={`px-6 py-3 rounded-lg font-bold transition-all ${selectedMarket === 'CRYPTO'
+                                        ? 'bg-gradient-primary text-white shadow-lg'
+                                        : 'text-muted-foreground hover:text-foreground'
                                         }`}
                                 >
                                     Cryptocurrency
                                 </button>
                                 <button
-                                    onClick={() => { setSelectedMarket('FOREX'); setSignals([]); setIsLoading(true); }}
-                                    className={`px-6 py-3 rounded-lg font-bold transition-all ${selectedMarket === 'FOREX' ? 'bg-gradient-primary text-white shadow-lg' : 'text-muted-foreground hover:text-foreground'
+                                    onClick={() => {
+                                        setSelectedMarket('FOREX');
+                                        setSelectedType('SPOT'); // Forex only has SPOT
+                                        setSignals([]);
+                                        setIsLoading(false);
+                                        // Auto-load signals for Forex since no second step needed
+                                        setTimeout(() => {
+                                            generateSignals();
+                                            showInfo('FOREX SPOT Signals', 'Viewing live signals with 75%+ accuracy');
+                                        }, 100);
+                                    }}
+                                    className={`px-6 py-3 rounded-lg font-bold transition-all ${selectedMarket === 'FOREX'
+                                        ? 'bg-gradient-primary text-white shadow-lg'
+                                        : 'text-muted-foreground hover:text-foreground'
                                         }`}
                                 >
                                     Forex & Gold
@@ -263,25 +326,54 @@ export default function DashboardPage() {
                             </div>
                         </div>
 
-                        <div>
-                            <p className="text-sm text-muted-foreground mb-2">Select Signal Type</p>
-                            <div className="flex gap-2 glass rounded-lg p-1 w-fit">
-                                <button
-                                    onClick={() => { setSelectedType('SPOT'); setSignals([]); setIsLoading(true); }}
-                                    className={`px-6 py-3 rounded-lg font-bold transition-all ${selectedType === 'SPOT' ? 'bg-gradient-primary text-white shadow-lg' : 'text-muted-foreground hover:text-foreground'
-                                        }`}
-                                >
-                                    Spot Trading
-                                </button>
-                                <button
-                                    onClick={() => { setSelectedType('FUTURE'); setSignals([]); setIsLoading(true); }}
-                                    className={`px-6 py-3 rounded-lg font-bold transition-all ${selectedType === 'FUTURE' ? 'bg-gradient-primary text-white shadow-lg' : 'text-muted-foreground hover:text-foreground'
-                                        }`}
-                                >
-                                    Future Trading
-                                </button>
-                            </div>
-                        </div>
+                        {/* Step 2: Select Trading Type (Only for Cryptocurrency) */}
+                        {selectedMarket === 'CRYPTO' && (
+                            <motion.div
+                                initial={{ opacity: 0, y: -10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ duration: 0.3 }}
+                            >
+                                <p className="text-sm text-muted-foreground mb-2">Step 2: Select Trading Type</p>
+                                <div className="flex gap-2 glass rounded-lg p-1 w-fit">
+                                    <button
+                                        onClick={() => {
+                                            setSelectedType('SPOT');
+                                            setSignals([]);
+                                            setIsLoading(false);
+                                            // Load signals after selection
+                                            setTimeout(() => {
+                                                generateSignals();
+                                                showInfo('CRYPTO SPOT Signals', 'Viewing live signals with 75%+ accuracy');
+                                            }, 100);
+                                        }}
+                                        className={`px-6 py-3 rounded-lg font-bold transition-all ${selectedType === 'SPOT'
+                                            ? 'bg-gradient-primary text-white shadow-lg'
+                                            : 'text-muted-foreground hover:text-foreground'
+                                            }`}
+                                    >
+                                        Spot Trading
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            setSelectedType('FUTURE');
+                                            setSignals([]);
+                                            setIsLoading(false);
+                                            // Load signals after selection
+                                            setTimeout(() => {
+                                                generateSignals();
+                                                showInfo('CRYPTO FUTURE Signals', 'Viewing live signals with 75%+ accuracy');
+                                            }, 100);
+                                        }}
+                                        className={`px-6 py-3 rounded-lg font-bold transition-all ${selectedType === 'FUTURE'
+                                            ? 'bg-gradient-primary text-white shadow-lg'
+                                            : 'text-muted-foreground hover:text-foreground'
+                                            }`}
+                                    >
+                                        Future Trading
+                                    </button>
+                                </div>
+                            </motion.div>
+                        )}
                     </div>
                 </motion.div>
 
@@ -292,7 +384,7 @@ export default function DashboardPage() {
                         title="Accuracy Rate"
                         value={`${stats.accuracyRate.toFixed(1)}%`}
                         icon={Award}
-                        trend={{ value: stats.accuracyRate - 85, isPositive: stats.accuracyRate >= 75 }}
+                        trend={stats.totalSignals > 0 ? { value: stats.accuracyRate - 85, isPositive: stats.accuracyRate >= 75 } : undefined}
                     />
                     <StatsCard
                         title="Avg Profit"
@@ -302,7 +394,22 @@ export default function DashboardPage() {
                     />
                 </div>
 
-                {isLoading ? (
+                {/* Show placeholder if no market selected */}
+                {!selectedMarket ? (
+                    <div className="glass rounded-lg p-12 text-center">
+                        <div className="space-y-4">
+                            <div className="text-2xl font-bold text-gradient">Welcome to AMG Trading</div>
+                            <div className="text-muted-foreground">Please select a market to get started</div>
+                        </div>
+                    </div>
+                ) : selectedMarket === 'CRYPTO' && !selectedType ? (
+                    <div className="glass rounded-lg p-12 text-center">
+                        <div className="space-y-4">
+                            <div className="text-2xl font-bold text-gradient">Cryptocurrency Selected</div>
+                            <div className="text-muted-foreground">Please select Spot or Future trading to continue</div>
+                        </div>
+                    </div>
+                ) : isLoading ? (
                     <div className="glass rounded-lg p-12 text-center">
                         <div className="space-y-4">
                             <div className="text-muted-foreground font-medium">{loadingStatus}</div>
@@ -351,11 +458,13 @@ export default function DashboardPage() {
                                     selectedConfidence={selectedConfidence}
                                     onConfidenceChange={setSelectedConfidence}
                                 />
-                                <SignalDirectionFilter
-                                    selectedDirections={selectedDirections}
-                                    onDirectionsChange={setSelectedDirections}
-                                    signalType={selectedType}
-                                />
+                                {selectedType && (
+                                    <SignalDirectionFilter
+                                        selectedDirections={selectedDirections}
+                                        onDirectionsChange={setSelectedDirections}
+                                        signalType={selectedType}
+                                    />
+                                )}
                             </div>
                         </div>
 

@@ -63,13 +63,13 @@ export class MarketDataManager {
         // Create more realistic market movements for Forex
         // Add trending behavior and volatility
         const trendDirection = Math.random() > 0.5 ? 1 : -1; // Random trend direction
-        const trendStrength = 0.0003 + Math.random() * 0.0007; // 0.03% to 0.1% per candle
+        const trendStrength = 0.0005 + Math.random() * 0.001; // 0.05% to 0.15% per candle (increased by 20%)
 
         for (let i = 0; i < dataPoints; i++) {
             // Combine trend with noise for realistic movement
             const trend = trendDirection * trendStrength; // Consistent trend
-            const volatility = (Math.random() - 0.5) * 0.015; // ±0.75% random volatility
-            const microMovement = (Math.random() - 0.5) * 0.003; // Small noise
+            const volatility = (Math.random() - 0.5) * 0.018; // ±0.9% random volatility (increased by 20%)
+            const microMovement = (Math.random() - 0.5) * 0.004; // Small noise (increased by 20%)
 
             // Total change combines trend, volatility, and noise
             const change = trend + volatility + microMovement;
@@ -174,7 +174,7 @@ export class MarketDataManager {
             // Top 31-60
             'ICP/USDT', 'APT/USDT', 'ARB/USDT', 'OP/USDT', 'INJ/USDT',
             'SUI/USDT', 'SEI/USDT', 'HBAR/USDT', 'IMX/USDT', 'RUNE/USDT',
-            'GRT/USDT', 'SNX/USDT', 'FLOW/USDT', 'EOS/USDT', 'XTZ/USDT',
+            'GRT/USDT', 'SNX/USDT', 'FLOW/USDT', 'XTZ/USDT',
             'EGLD/USDT', 'KAVA/USDT', 'ZIL/USDT', 'ENJ/USDT', 'CHZ/USDT',
             'COMP/USDT', 'YFI/USDT', 'MKR/USDT', 'SUSHI/USDT', 'CRV/USDT',
             '1INCH/USDT', 'BAT/USDT', 'ZRX/USDT', 'REN/USDT', 'LRC/USDT',

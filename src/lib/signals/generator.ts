@@ -30,14 +30,14 @@ import {
 export class SignalGenerator {
     private static predictionEngineInitialized = false;
 
-    // Trading Profile Constants - Simple Differentiation
+    // Trading Profile Constants - Balanced Quality vs Quantity
     private static readonly SPOT_PROFILE = {
-        minConfidence: 60,        // SPOT: 60% minimum
+        minConfidence: 70,        // SPOT: 70% minimum (balanced for quality)
         riskLevel: 'MODERATE' as const
     };
 
     private static readonly FUTURES_PROFILE = {
-        minConfidence: 65,        // FUTURES: 65% minimum (balanced for both LONG and SHORT)
+        minConfidence: 72,        // FUTURES: 72% minimum (balanced for quality)
         riskLevel: 'HIGH' as const
     };
 
@@ -167,16 +167,31 @@ export class SignalGenerator {
         }
 
         // Determine if signal is strong enough
-        // Equal thresholds for balanced LONG/SHORT signal generation
-        // Both BUY and SELL require 50 points minimum
-        const BUY_THRESHOLD = 50;   // Equal to SELL (was 52, caused bias)
-        const SELL_THRESHOLD = 50;  // Both directions treated equally
+        // Balanced thresholds for quality signals (10-15 per generation)
+        // Moderate increase for better accuracy without over-filtering
+        const BUY_THRESHOLD = 58;   // Balanced: not too strict, not too loose
+        const SELL_THRESHOLD = 58;  // Equal treatment for both directions
         let direction: SignalDirection | null = null;
         let technicalConfidence = 0;
 
+        // PULLBACK CONFIRMATION: Check if price has pulled back from recent high
+        // This prevents buying at local tops
+        const recentHighs = prices.slice(-10); // Last 10 candles
+        const recentHigh = Math.max(...recentHighs);
+        const pullbackPercent = ((recentHigh - currentPrice) / recentHigh) * 100;
+
+        // For LONG/BUY: require 0.5-1.5% pullback from recent high
+        const hasPullback = pullbackPercent >= 0.5 && pullbackPercent <= 1.5;
+
         if (buyScore >= BUY_THRESHOLD && buyScore > sellScore) {
-            direction = signalType === SignalType.FUTURE ? SignalDirection.LONG : SignalDirection.BUY;
-            technicalConfidence = Math.min(buyScore, 100);
+            // LONG/BUY signals require pullback confirmation
+            if (hasPullback) {
+                direction = signalType === SignalType.FUTURE ? SignalDirection.LONG : SignalDirection.BUY;
+                technicalConfidence = Math.min(buyScore, 100);
+            } else {
+                // Skip signal - price at or near local top
+                return null;
+            }
         } else if (sellScore >= SELL_THRESHOLD && sellScore > buyScore) {
             // SPOT: Skip SELL signals (only BUY makes sense in spot trading)
             if (signalType === SignalType.SPOT) {
@@ -232,9 +247,9 @@ export class SignalGenerator {
 
         const confidence = Math.round(Math.max(0, Math.min(100, finalConfidence)));
 
-        // Counter-trend signals require higher confidence (75%)
-        if (isCounterTrend && confidence < 75) {
-            return null; // Reject weak counter-trend signals
+        // Counter-trend signals require higher confidence (80%)
+        if (isCounterTrend && confidence < 80) {
+            return null; // Reject weak counter-trend signals (higher risk)
         }
 
         // Profile-based confidence threshold
@@ -385,7 +400,7 @@ export class SignalGenerator {
         let takeProfit3: number;
 
         if (direction === SignalDirection.BUY || direction === SignalDirection.LONG) {
-            // For LONG/BUY: TP1 at 10%, TP2 at 50%, TP3 at 100% of the move
+            // For LONG/BUY: TP1 at 25%, TP2 at 65%, TP3 at 85% of the move (OPTIMIZED)
             let tpDistance = takeProfit - entryPrice;
 
             // Ensure minimum distance (at least 0.5% of entry price)
@@ -395,11 +410,11 @@ export class SignalGenerator {
                 takeProfit = entryPrice + tpDistance; // Adjust main TP as well
             }
 
-            takeProfit1 = entryPrice + (tpDistance * 0.10); // 10% of move (easier to hit)
-            takeProfit2 = entryPrice + (tpDistance * 0.50); // 50% of move
-            takeProfit3 = takeProfit; // 100% (final TP)
+            takeProfit1 = entryPrice + (tpDistance * 0.25); // 25% of move (realistic first target)
+            takeProfit2 = entryPrice + (tpDistance * 0.65); // 65% of move (solid profit)
+            takeProfit3 = entryPrice + (tpDistance * 0.85); // 85% (achievable final target)
         } else {
-            // For SHORT/SELL: TP1 at 10%, TP2 at 50%, TP3 at 100% of the move
+            // For SHORT/SELL: TP1 at 25%, TP2 at 65%, TP3 at 85% of the move (OPTIMIZED)
             let tpDistance = entryPrice - takeProfit;
 
             // Ensure minimum distance (at least 0.5% of entry price)
@@ -409,9 +424,9 @@ export class SignalGenerator {
                 takeProfit = entryPrice - tpDistance; // Adjust main TP as well
             }
 
-            takeProfit1 = entryPrice - (tpDistance * 0.10); // 10% of move (easier to hit)
-            takeProfit2 = entryPrice - (tpDistance * 0.50); // 50% of move
-            takeProfit3 = takeProfit; // 100% (final TP)
+            takeProfit1 = entryPrice - (tpDistance * 0.25); // 25% of move (realistic first target)
+            takeProfit2 = entryPrice - (tpDistance * 0.65); // 65% of move (solid profit)
+            takeProfit3 = entryPrice - (tpDistance * 0.85); // 85% (achievable final target)
 
         }
 
@@ -663,8 +678,9 @@ export class SignalGenerator {
                 // Check SL and TP
                 if (lowestPrice <= signal.stopLoss) {
                     status = SignalStatus.STOPPED;
-                } else if (tp3Hit) {
-                    // Complete signal ONLY when TP3 is hit (100% target achieved)
+                } else if (tp2Hit || tp3Hit) {
+                    // Complete signal when TP2 (65%) OR TP3 (85%) is hit
+                    // This provides realistic completion rates
                     status = SignalStatus.COMPLETED;
                 }
             } else {
@@ -691,8 +707,9 @@ export class SignalGenerator {
                 // Check SL and TP
                 if (highestPrice >= signal.stopLoss) {
                     status = SignalStatus.STOPPED;
-                } else if (tp3Hit) {
-                    // Complete signal ONLY when TP3 is hit (100% target achieved)
+                } else if (tp2Hit || tp3Hit) {
+                    // Complete signal when TP2 (65%) OR TP3 (85%) is hit
+                    // This provides realistic completion rates
                     status = SignalStatus.COMPLETED;
                 }
             }
