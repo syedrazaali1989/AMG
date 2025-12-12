@@ -39,6 +39,7 @@ export function Navbar() {
     const navLinks = [
         { href: '/', label: 'Home' },
         { href: '/dashboard', label: 'Dashboard' },
+        { href: '/scalping', label: 'Scalping ⚡' },
         { href: '/completed', label: 'Completed Signals' },
     ];
 
