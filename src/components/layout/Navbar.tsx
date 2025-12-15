@@ -40,6 +40,7 @@ export function Navbar() {
         { href: '/', label: 'Home' },
         { href: '/dashboard', label: 'Dashboard' },
         { href: '/scalping', label: 'Scalping ⚡' },
+        { href: '/on-chain', label: 'On-Chain 🐋' },
         { href: '/completed', label: 'Completed Signals' },
     ];
 
