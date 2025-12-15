@@ -172,7 +172,7 @@ export default function ScalpingPage() {
                     <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-full px-6 py-3 flex items-center gap-3">
                         <Zap className="w-5 h-5 text-yellow-500 animate-pulse" />
                         <span className="text-yellow-500 font-bold text-lg">⚡ SCALPING MODE ⚡</span>
-                        <span className="text-sm text-muted-foreground">5-min candles • 0.2-0.8% targets</span>
+                        <span className="text-sm text-muted-foreground">5-min candles • 1-3% targets</span>
                     </div>
                 </div>
 
@@ -187,7 +187,7 @@ export default function ScalpingPage() {
                             Quick Scalping Signals
                         </h1>
                         <p className="text-muted-foreground mb-8">
-                            Fast trading • 15-60 minute targets • 0.3-0.8% profits
+                            Fast trading • 15-60 minute targets • 1-3% profits
                         </p>
 
                         <div className="grid grid-cols-2 gap-6">

@@ -184,7 +184,7 @@ export default function CompletedSignalsPage() {
                                     </div>
                                     <div>
                                         <h2 className="text-2xl font-bold text-yellow-500">Scalping Signals</h2>
-                                        <p className="text-sm text-muted-foreground">Quick profit targets (0.5-1.5%)</p>
+                                        <p className="text-sm text-muted-foreground">Quick profit targets (1-3%)</p>
                                     </div>
                                 </div>
                                 <div className="space-y-8">

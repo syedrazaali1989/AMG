@@ -1,5 +1,6 @@
 import { Signal, SignalType, SignalDirection, MarketType, SignalStatus, Timeframe } from './types';
 import { ScalpingMarketData } from './scalpingMarketData';
+import { ExchangeAvailability } from './exchangeAvailability';
 
 /**
  * Scalping Signal Generator
@@ -121,6 +122,9 @@ export class ScalpingSignalGenerator {
             prices
         );
 
+        // Get available exchanges for this pair
+        const availableExchanges = ExchangeAvailability.getAvailableExchanges(pair, marketType);
+
         // Create signal
         const signal: Signal = {
             id: `SCALP_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -147,7 +151,8 @@ export class ScalpingSignalGenerator {
             tp3Hit: false,
             highestPrice: currentPrice,
             lowestPrice: currentPrice,
-            rationalePoints: [this.generateScalpingRationale(rsi, macd, volumeRatio, direction)]
+            rationalePoints: [this.generateScalpingRationale(rsi, macd, volumeRatio, direction)],
+            availableExchanges // Add exchange availability
         };
 
         return signal;
@@ -225,17 +230,17 @@ export class ScalpingSignalGenerator {
 
         if (direction === SignalDirection.BUY || direction === SignalDirection.LONG) {
             return {
-                tp1: entryPrice * 1.005, // 0.5% - quick target
-                tp2: entryPrice * 1.010, // 1.0% - main target
-                tp3: entryPrice * 1.015, // 1.5% - bonus target
-                stopLoss: entryPrice * 0.995 // -0.5% tight stop
+                tp1: entryPrice * 1.010, // 1.0% - quick target
+                tp2: entryPrice * 1.020, // 2.0% - main target
+                tp3: entryPrice * 1.030, // 3.0% - bonus target
+                stopLoss: entryPrice * 0.993 // -0.7% stop
             };
         } else {
             return {
-                tp1: entryPrice * 0.995, // 0.5%
-                tp2: entryPrice * 0.990, // 1.0%
-                tp3: entryPrice * 0.985, // 1.5%
-                stopLoss: entryPrice * 1.005 // -0.5%
+                tp1: entryPrice * 0.990, // 1.0%
+                tp2: entryPrice * 0.980, // 2.0%
+                tp3: entryPrice * 0.970, // 3.0%
+                stopLoss: entryPrice * 1.007 // -0.7%
             };
         }
     }
