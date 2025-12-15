@@ -17,8 +17,8 @@ export class CorrelatedSignalGenerator {
         includeAllCoins: boolean = true
     ): Promise<Signal[]> {
         try {
-            // Get correlated coins (75%+ correlation)
-            const correlatedCoins = CorrelationMatrix.getCorrelatedCoins(0.75);
+            // Get RANDOM correlated coins (6 random from 15+ pool) for variety
+            const correlatedCoins = CorrelationMatrix.getRandomCorrelatedCoins(6, 0.74);
 
             const signals: Signal[] = [];
 
@@ -29,7 +29,7 @@ export class CorrelatedSignalGenerator {
                 }
             }
 
-            console.log(`✅ Generated ${signals.length} correlated signals following BTC`);
+            console.log(`✅ Generated ${signals.length} random correlated signals: ${correlatedCoins.map(c => c.symbol).join(', ')}`);
             return signals;
         } catch (error) {
             console.error('Correlated signal generation error:', error);

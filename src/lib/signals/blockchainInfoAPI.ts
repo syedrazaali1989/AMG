@@ -63,7 +63,7 @@ export class BlockchainInfoAPI {
     /**
      * Get recent large Bitcoin transactions
      */
-    static async getLargeTransactions(minValueUSD: number = 1000000): Promise<LargeTransaction[]> {
+    static async getLargeTransactions(minValueUSD: number = 500000): Promise<LargeTransaction[]> {
         try {
             // Get current BTC price
             const btcPrice = await this.getBTCPrice();

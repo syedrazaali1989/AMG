@@ -12,43 +12,101 @@ export class CorrelationMatrix {
     /**
      * Correlation strength between BTC and major altcoins
      * Based on historical market data (2023-2024)
+     * EXPANDED POOL - 15+ coins for random selection
      */
     private static readonly BTC_CORRELATIONS: Record<string, CorrelationData> = {
+        // Very High Correlation (85%+)
         'ETH': {
             symbol: 'ETH',
             pair: 'ETH/USDT',
-            correlation: 0.90, // 90% correlation
+            correlation: 0.90,
             label: 'Ethereum (Layer 1)'
-        },
-        'SOL': {
-            symbol: 'SOL',
-            pair: 'SOL/USDT',
-            correlation: 0.88, // 88% correlation
-            label: 'Solana (Layer 1)'
-        },
-        'BNB': {
-            symbol: 'BNB',
-            pair: 'BNB/USDT',
-            correlation: 0.85, // 85% correlation
-            label: 'Binance Coin (Exchange)'
         },
         'AVAX': {
             symbol: 'AVAX',
             pair: 'AVAX/USDT',
-            correlation: 0.87, // 87% correlation
+            correlation: 0.87,
             label: 'Avalanche (Layer 1)'
+        },
+        'SOL': {
+            symbol: 'SOL',
+            pair: 'SOL/USDT',
+            correlation: 0.88,
+            label: 'Solana (Layer 1)'
         },
         'MATIC': {
             symbol: 'MATIC',
             pair: 'MATIC/USDT',
-            correlation: 0.86, // 86% correlation
+            correlation: 0.86,
             label: 'Polygon (Layer 2)'
+        },
+        'BNB': {
+            symbol: 'BNB',
+            pair: 'BNB/USDT',
+            correlation: 0.85,
+            label: 'Binance Coin (Exchange)'
+        },
+
+        // High Correlation (75-85%)
+        'DOT': {
+            symbol: 'DOT',
+            pair: 'DOT/USDT',
+            correlation: 0.82,
+            label: 'Polkadot (Layer 0)'
+        },
+        'LINK': {
+            symbol: 'LINK',
+            pair: 'LINK/USDT',
+            correlation: 0.81,
+            label: 'Chainlink (Oracle)'
+        },
+        'UNI': {
+            symbol: 'UNI',
+            pair: 'UNI/USDT',
+            correlation: 0.79,
+            label: 'Uniswap (DEX)'
+        },
+        'ATOM': {
+            symbol: 'ATOM',
+            pair: 'ATOM/USDT',
+            correlation: 0.78,
+            label: 'Cosmos (Interoperability)'
+        },
+        'LTC': {
+            symbol: 'LTC',
+            pair: 'LTC/USDT',
+            correlation: 0.83,
+            label: 'Litecoin (Payment)'
         },
         'ADA': {
             symbol: 'ADA',
             pair: 'ADA/USDT',
-            correlation: 0.75, // 75% correlation
+            correlation: 0.75,
             label: 'Cardano (Layer 1)'
+        },
+        'XRP': {
+            symbol: 'XRP',
+            pair: 'XRP/USDT',
+            correlation: 0.76,
+            label: 'Ripple (Payment)'
+        },
+        'DOGE': {
+            symbol: 'DOGE',
+            pair: 'DOGE/USDT',
+            correlation: 0.77,
+            label: 'Dogecoin (Meme)'
+        },
+        'SHIB': {
+            symbol: 'SHIB',
+            pair: 'SHIB/USDT',
+            correlation: 0.74,
+            label: 'Shiba Inu (Meme)'
+        },
+        'APT': {
+            symbol: 'APT',
+            pair: 'APT/USDT',
+            correlation: 0.80,
+            label: 'Aptos (Layer 1)'
         }
     };
 
@@ -60,6 +118,22 @@ export class CorrelationMatrix {
         return Object.values(this.BTC_CORRELATIONS)
             .filter(coin => coin.correlation >= minCorrelation)
             .sort((a, b) => b.correlation - a.correlation); // Highest first
+    }
+
+    /**
+     * Get random correlated coins for variety
+     * @param count Number of random coins to select
+     * @param minCorrelation Minimum correlation threshold
+     */
+    static getRandomCorrelatedCoins(count: number = 6, minCorrelation: number = 0.74): CorrelationData[] {
+        const allCoins = Object.values(this.BTC_CORRELATIONS)
+            .filter(coin => coin.correlation >= minCorrelation);
+
+        // Shuffle array
+        const shuffled = allCoins.sort(() => Math.random() - 0.5);
+
+        // Return random selection
+        return shuffled.slice(0, Math.min(count, shuffled.length));
     }
 
     /**

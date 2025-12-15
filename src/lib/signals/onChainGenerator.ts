@@ -15,8 +15,8 @@ export class OnChainSignalGenerator {
      */
     static async generateOnChainSignals(): Promise<Signal[]> {
         try {
-            // Get REAL Bitcoin transactions from Blockchain.info (min $1M)
-            const bitcoinTransactions = await BlockchainInfoAPI.getLargeTransactions(1000000);
+            // Get REAL Bitcoin transactions from Blockchain.info (min $500K)
+            const bitcoinTransactions = await BlockchainInfoAPI.getLargeTransactions(500000);
 
             if (!bitcoinTransactions || bitcoinTransactions.length === 0) {
                 console.warn('No large Bitcoin transactions found');
