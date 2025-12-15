@@ -47,32 +47,59 @@ export class ScalpingSignalGenerator {
         let buyScore = 0;
         let sellScore = 0;
 
-        // RSI Scoring (tighter ranges for scalping)
-        if (rsi < 40) buyScore += 20; // Oversold
-        else if (rsi > 60) sellScore += 20; // Overbought
+        // RSI Scoring (HIGHER WEIGHT - RSI is critical for scalping!)
+        if (rsi < 45) {
+            buyScore += 30; // Oversold - strong buy signal
+            // Prevent SHORT when oversold
+            if (rsi < 35) sellScore = 0;
+        } else if (rsi > 55) {
+            sellScore += 30; // Overbought - strong sell signal
+            // Prevent LONG when overbought
+            if (rsi > 65) buyScore = 0;
+        }
 
         // MACD Scoring
         if (macd.histogram > 0 && macd.histogram > macd.previousHistogram) {
-            buyScore += 25; // Bullish momentum
+            if (rsi < 65) buyScore += 25; // Only add if not overbought
         } else if (macd.histogram < 0 && macd.histogram < macd.previousHistogram) {
-            sellScore += 25; // Bearish momentum
+            if (rsi > 35) sellScore += 25; // Only add if not oversold
         }
 
-        // Volume confirmation (critical for scalping)
+        // Additional MACD signals (only if RSI allows)
+        if (macd.histogram > 0 && rsi < 60) buyScore += 10;
+        if (macd.histogram < 0 && rsi > 40) sellScore += 10;
+
+        // Volume confirmation (doesn't add to direction, just confirms)
+        let volumeBoost = 0;
         if (volumeRatio >= 2.0) {
-            buyScore += 15;
-            sellScore += 15; // High volume confirms both directions
-        } else if (volumeRatio < 1.2) {
-            return null; // Skip low volume signals
+            volumeBoost = 15;
+        } else if (volumeRatio >= 1.0) {
+            volumeBoost = 10;
+        } else if (volumeRatio < 0.8) {
+            return null; // Skip very low volume signals
         }
+
+        // Apply volume boost to winning direction only (not both!)
+        // We'll apply this after determining direction
 
         // Short-term momentum
         const momentum = (currentPrice - prices[prices.length - 10]) / prices[prices.length - 10];
-        if (momentum > 0.002) buyScore += 10; // 0.2% up = bullish
-        if (momentum < -0.002) sellScore += 10; // 0.2% down = bearish
+        if (momentum > 0.001 && rsi < 60) buyScore += 10;
+        if (momentum < -0.001 && rsi > 40) sellScore += 10;
 
-        // Minimum score for scalping (lowered for more signals)
-        const MIN_SCORE = 45; // Lower threshold for frequent scalping signals
+        // Determine preliminary direction
+        let preliminaryBuyScore = buyScore;
+        let preliminarySellScore = sellScore;
+
+        // Apply volume boost to the winning direction only
+        if (preliminaryBuyScore > preliminarySellScore) {
+            buyScore += volumeBoost;
+        } else if (preliminarySellScore > preliminaryBuyScore) {
+            sellScore += volumeBoost;
+        }
+
+        // Minimum score for scalping
+        const MIN_SCORE = 30;
         let direction: SignalDirection | null = null;
         let confidence = 0;
 
@@ -115,13 +142,12 @@ export class ScalpingSignalGenerator {
             status: SignalStatus.ACTIVE,
             timestamp: new Date(), // Correct field name!
             timeframe: Timeframe.FIVE_MINUTES, // Scalping timeframe
-            volume: volumes[volumes.length - 1],
             tp1Hit: false,
             tp2Hit: false,
             tp3Hit: false,
             highestPrice: currentPrice,
             lowestPrice: currentPrice,
-            rationale: this.generateScalpingRationale(rsi, macd, volumeRatio, direction)
+            rationalePoints: [this.generateScalpingRationale(rsi, macd, volumeRatio, direction)]
         };
 
         return signal;
@@ -199,17 +225,17 @@ export class ScalpingSignalGenerator {
 
         if (direction === SignalDirection.BUY || direction === SignalDirection.LONG) {
             return {
-                tp1: entryPrice * 1.002, // 0.2% - quick target
-                tp2: entryPrice * 1.005, // 0.5% - main target
-                tp3: entryPrice * 1.008, // 0.8% - bonus target
-                stopLoss: entryPrice * 0.997 // -0.3% tight stop
+                tp1: entryPrice * 1.005, // 0.5% - quick target
+                tp2: entryPrice * 1.010, // 1.0% - main target
+                tp3: entryPrice * 1.015, // 1.5% - bonus target
+                stopLoss: entryPrice * 0.995 // -0.5% tight stop
             };
         } else {
             return {
-                tp1: entryPrice * 0.998, // 0.2%
-                tp2: entryPrice * 0.995, // 0.5%
-                tp3: entryPrice * 0.992, // 0.8%
-                stopLoss: entryPrice * 1.003 // -0.3%
+                tp1: entryPrice * 0.995, // 0.5%
+                tp2: entryPrice * 0.990, // 1.0%
+                tp3: entryPrice * 0.985, // 1.5%
+                stopLoss: entryPrice * 1.005 // -0.5%
             };
         }
     }

@@ -63,6 +63,12 @@ export default function ScalpingPage() {
                     ? ((newPrice - signal.entryPrice) / signal.entryPrice) * 100
                     : ((signal.entryPrice - newPrice) / signal.entryPrice) * 100;
 
+                // Track TP hit times
+                const now = new Date();
+                const tp1HitTime = tp1Hit && !signal.tp1Hit ? now : signal.tp1HitTime;
+                const tp2HitTime = tp2Hit && !signal.tp2Hit ? now : signal.tp2HitTime;
+                const tp3HitTime = tp3Hit && !signal.tp3Hit ? now : signal.tp3HitTime;
+
                 const updatedSignal = {
                     ...signal,
                     currentPrice: newPrice,
@@ -70,6 +76,9 @@ export default function ScalpingPage() {
                     tp1Hit: signal.tp1Hit || tp1Hit,
                     tp2Hit: signal.tp2Hit || tp2Hit,
                     tp3Hit: signal.tp3Hit || tp3Hit,
+                    tp1HitTime,
+                    tp2HitTime,
+                    tp3HitTime,
                     profitLossPercentage: profitLoss,
                     status: (tp2Hit || tp3Hit) ? SignalStatus.COMPLETED : signal.status
                 };
@@ -80,8 +89,7 @@ export default function ScalpingPage() {
                     completedSignals.push({
                         ...updatedSignal,
                         completedAt: new Date().toISOString(),
-                        tp2HitTime: tp2Hit ? new Date() : signal.tp2HitTime,
-                        tp3HitTime: tp3Hit ? new Date() : signal.tp3HitTime
+                        isScalping: true // Mark as scalping signal
                     });
                     localStorage.setItem('completedSignals', JSON.stringify(completedSignals));
 

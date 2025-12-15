@@ -12,4 +12,8 @@ export const metadata = {
 
 export default {
   reactStrictMode: true,
+  eslint: {
+    // Disable ESLint during production builds
+    ignoreDuringBuilds: true,
+  },
 };

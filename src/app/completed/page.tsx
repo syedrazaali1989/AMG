@@ -77,13 +77,31 @@ export default function CompletedSignalsPage() {
         }
     }, [mounted]);
 
+    // Separate scalping and regular signals
+    const scalpingSignals = completedSignals.filter((s: any) => s.isScalping === true);
+    const regularSignals = completedSignals.filter((s: any) => s.isScalping !== true);
+
     const profitableSignals = completedSignals.filter(s => (s.profitLossPercentage || 0) > 0);
     const totalProfit = completedSignals.reduce((sum, s) => sum + (s.profitLossPercentage || 0), 0);
     const avgProfit = completedSignals.length > 0 ? totalProfit / completedSignals.length : 0;
     const winRate = completedSignals.length > 0 ? (profitableSignals.length / completedSignals.length) * 100 : 0;
 
-    // Group signals by date
-    const groupedByDate = completedSignals.reduce((groups: any, signal) => {
+    // Group scalping signals by date
+    const scalpingGroupedByDate = scalpingSignals.reduce((groups: any, signal) => {
+        const date = new Date(signal.completedAt).toLocaleDateString('en-US', {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric'
+        });
+        if (!groups[date]) {
+            groups[date] = [];
+        }
+        groups[date].push(signal);
+        return groups;
+    }, {});
+
+    // Group regular signals by date
+    const regularGroupedByDate = regularSignals.reduce((groups: any, signal) => {
         const date = new Date(signal.completedAt).toLocaleDateString('en-US', {
             year: 'numeric',
             month: 'long',
@@ -154,25 +172,74 @@ export default function CompletedSignalsPage() {
                     </motion.div>
                 </div>
 
-                {/* Signals Grouped by Date */}
+                {/* Signals Sections */}
                 {completedSignals.length > 0 ? (
-                    <div className="space-y-8">
-                        {Object.entries(groupedByDate).map(([date, signals]: [string, any]) => (
-                            <div key={date}>
-                                <h2 className="text-xl font-bold mb-4 text-gradient">{date}</h2>
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                    {signals.map((signal: any) => (
-                                        <motion.div
-                                            key={signal.uniqueKey}
-                                            initial={{ opacity: 0, y: 20 }}
-                                            animate={{ opacity: 1, y: 0 }}
-                                        >
-                                            <SignalCard signal={signal} />
-                                        </motion.div>
+                    <div className="space-y-12">
+                        {/* Scalping Signals Section */}
+                        {scalpingSignals.length > 0 && (
+                            <div>
+                                <div className="flex items-center gap-3 mb-6">
+                                    <div className="p-2 rounded-lg bg-yellow-500/10 border border-yellow-500/30">
+                                        <span className="text-2xl">⚡</span>
+                                    </div>
+                                    <div>
+                                        <h2 className="text-2xl font-bold text-yellow-500">Scalping Signals</h2>
+                                        <p className="text-sm text-muted-foreground">Quick profit targets (0.5-1.5%)</p>
+                                    </div>
+                                </div>
+                                <div className="space-y-8">
+                                    {Object.entries(scalpingGroupedByDate).map(([date, signals]: [string, any]) => (
+                                        <div key={`scalping-${date}`}>
+                                            <h3 className="text-lg font-semibold mb-4 text-yellow-500/70">{date}</h3>
+                                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                                {signals.map((signal: any) => (
+                                                    <motion.div
+                                                        key={signal.uniqueKey}
+                                                        initial={{ opacity: 0, y: 20 }}
+                                                        animate={{ opacity: 1, y: 0 }}
+                                                    >
+                                                        <SignalCard signal={signal} />
+                                                    </motion.div>
+                                                ))}
+                                            </div>
+                                        </div>
                                     ))}
                                 </div>
                             </div>
-                        ))}
+                        )}
+
+                        {/* Regular Signals Section */}
+                        {regularSignals.length > 0 && (
+                            <div>
+                                <div className="flex items-center gap-3 mb-6">
+                                    <div className="p-2 rounded-lg bg-primary/10 border border-primary/30">
+                                        <Trophy className="w-6 h-6 text-primary" />
+                                    </div>
+                                    <div>
+                                        <h2 className="text-2xl font-bold text-gradient">Regular Signals</h2>
+                                        <p className="text-sm text-muted-foreground">Standard trading signals</p>
+                                    </div>
+                                </div>
+                                <div className="space-y-8">
+                                    {Object.entries(regularGroupedByDate).map(([date, signals]: [string, any]) => (
+                                        <div key={`regular-${date}`}>
+                                            <h3 className="text-lg font-semibold mb-4 text-primary/70">{date}</h3>
+                                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                                {signals.map((signal: any) => (
+                                                    <motion.div
+                                                        key={signal.uniqueKey}
+                                                        initial={{ opacity: 0, y: 20 }}
+                                                        animate={{ opacity: 1, y: 0 }}
+                                                    >
+                                                        <SignalCard signal={signal} />
+                                                    </motion.div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
                     </div>
                 ) : (
                     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center py-16">
