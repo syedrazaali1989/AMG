@@ -282,8 +282,8 @@ export default function DashboardPage() {
                 <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="mb-8">
                     <div className="flex flex-col gap-6">
                         <div>
-                            <h1 className="text-4xl font-bold text-gradient mb-2">Trading Signals</h1>
-                            <p className="text-muted-foreground">Real-time signals with 75%+ accuracy</p>
+                            <h1 className="text-4xl font-bold text-gradient mb-2">Standard Trading Signals</h1>
+                            <p className="text-muted-foreground">Medium-term opportunities with 75%+ accuracy</p>
                         </div>
 
                         {/* Step 1: Select Market Type */}

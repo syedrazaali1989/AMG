@@ -17,8 +17,8 @@ export class CorrelatedSignalGenerator {
         includeAllCoins: boolean = true
     ): Promise<Signal[]> {
         try {
-            // Get RANDOM correlated coins (6 random from 15+ pool) for variety
-            const correlatedCoins = CorrelationMatrix.getRandomCorrelatedCoins(6, 0.74);
+            // Get RANDOM correlated coins (10 random from 15+ pool) for MORE variety
+            const correlatedCoins = CorrelationMatrix.getRandomCorrelatedCoins(10, 0.74);
 
             const signals: Signal[] = [];
 

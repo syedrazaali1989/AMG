@@ -10,6 +10,7 @@ import { TrendingUp, Trophy, Target } from 'lucide-react';
 export default function CompletedSignalsPage() {
     const [completedSignals, setCompletedSignals] = useState<(Signal & { completedAt: string; uniqueKey?: string })[]>([]);
     const [mounted, setMounted] = useState(false);
+    const [activeFilter, setActiveFilter] = useState<'all' | 'standard' | 'scalping' | 'onchain'>('all');
 
     useEffect(() => {
         setMounted(true);
@@ -77,14 +78,28 @@ export default function CompletedSignalsPage() {
         }
     }, [mounted]);
 
-    // Separate scalping and regular signals
-    const scalpingSignals = completedSignals.filter((s: any) => s.isScalping === true);
-    const regularSignals = completedSignals.filter((s: any) => s.isScalping !== true);
+    // Filter signals based on active filter
+    const filteredSignals = activeFilter === 'scalping'
+        ? completedSignals.filter((s: any) => s.isScalping === true)
+        : activeFilter === 'onchain'
+            ? completedSignals.filter((s: any) => s.id.startsWith('ONCHAIN') || s.id.startsWith('CORR'))
+            : activeFilter === 'standard'
+                ? completedSignals.filter((s: any) =>
+                    s.isScalping !== true &&
+                    !s.id.startsWith('ONCHAIN') &&
+                    !s.id.startsWith('CORR')
+                )
+                : completedSignals;
 
-    const profitableSignals = completedSignals.filter(s => (s.profitLossPercentage || 0) > 0);
-    const totalProfit = completedSignals.reduce((sum, s) => sum + (s.profitLossPercentage || 0), 0);
-    const avgProfit = completedSignals.length > 0 ? totalProfit / completedSignals.length : 0;
-    const winRate = completedSignals.length > 0 ? (profitableSignals.length / completedSignals.length) * 100 : 0;
+    // Separate scalping and regular signals from filtered
+    const scalpingSignals = filteredSignals.filter((s: any) => s.isScalping === true);
+    const regularSignals = filteredSignals.filter((s: any) => s.isScalping !== true);
+
+    // Calculate stats for filtered signals
+    const profitableSignals = filteredSignals.filter(s => (s.profitLossPercentage || 0) > 0);
+    const totalProfit = filteredSignals.reduce((sum, s) => sum + (s.profitLossPercentage || 0), 0);
+    const avgProfit = filteredSignals.length > 0 ? totalProfit / filteredSignals.length : 0;
+    const winRate = filteredSignals.length > 0 ? (profitableSignals.length / filteredSignals.length) * 100 : 0;
 
     // Group scalping signals by date
     const scalpingGroupedByDate = scalpingSignals.reduce((groups: any, signal) => {
@@ -142,7 +157,7 @@ export default function CompletedSignalsPage() {
                             <Target className="w-4 h-4 text-primary" />
                             <span className="text-sm text-muted-foreground">Total Completed</span>
                         </div>
-                        <div className="text-2xl font-bold">{completedSignals.length}</div>
+                        <div className="text-2xl font-bold">{filteredSignals.length}</div>
                     </motion.div>
 
                     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="glass rounded-lg p-4">
@@ -172,8 +187,65 @@ export default function CompletedSignalsPage() {
                     </motion.div>
                 </div>
 
+                {/* Filter Buttons */}
+                <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.5 }}
+                    className="flex flex-wrap gap-3 mb-8"
+                >
+                    {/* All Button */}
+                    <button
+                        onClick={() => setActiveFilter('all')}
+                        className={`px-6 py-3 rounded-lg font-semibold transition-all ${activeFilter === 'all'
+                            ? 'bg-primary text-primary-foreground shadow-lg scale-105'
+                            : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'
+                            }`}
+                    >
+                        <Trophy className="w-4 h-4 inline mr-2" />
+                        All
+                    </button>
+
+                    {/* Standard Button */}
+                    <button
+                        onClick={() => setActiveFilter('standard')}
+                        className={`px-6 py-3 rounded-lg font-semibold transition-all ${activeFilter === 'standard'
+                            ? 'bg-blue-500 text-white shadow-lg scale-105'
+                            : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'
+                            }`}
+                    >
+                        <TrendingUp className="w-4 h-4 inline mr-2" />
+                        Standard
+                    </button>
+
+                    {/* Scalping Button */}
+                    <button
+                        onClick={() => setActiveFilter('scalping')}
+                        className={`px-6 py-3 rounded-lg font-semibold transition-all ${activeFilter === 'scalping'
+                            ? 'bg-green-500 text-white shadow-lg scale-105'
+                            : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'
+                            }`}
+                    >
+                        <Target className="w-4 h-4 inline mr-2" />
+                        Scalping
+                    </button>
+
+                    {/* On-Chain Button */}
+                    <button
+                        onClick={() => setActiveFilter('onchain')}
+                        className={`px-6 py-3 rounded-lg font-semibold transition-all ${activeFilter === 'onchain'
+                            ? 'bg-orange-500 text-white shadow-lg scale-105'
+                            : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'
+                            }`}
+                    >
+                        <TrendingUp className="w-4 h-4 inline mr-2" />
+                        On-Chain
+                    </button>
+                </motion.div>
+
                 {/* Signals Sections */}
-                {completedSignals.length > 0 ? (
+                {/* Signals Display */}
+                {filteredSignals.length > 0 ? (
                     <div className="space-y-12">
                         {/* Scalping Signals Section */}
                         {scalpingSignals.length > 0 && (

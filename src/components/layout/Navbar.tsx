@@ -38,7 +38,7 @@ export function Navbar() {
 
     const navLinks = [
         { href: '/', label: 'Home' },
-        { href: '/dashboard', label: 'Dashboard' },
+        { href: '/dashboard', label: 'Standard' },
         { href: '/scalping', label: 'Scalping ⚡' },
         { href: '/on-chain', label: 'On-Chain 🐋' },
         { href: '/completed', label: 'Completed Signals' },

@@ -129,7 +129,7 @@ export class BlockchainInfoAPI {
 
             console.log(`🔗 Found ${largeTransactions.length} real BTC transactions over $${minValueUSD.toLocaleString()}`);
 
-            return largeTransactions.slice(0, 20); // Top 20
+            return largeTransactions.slice(0, 50); // Top 50 for comprehensive analysis
 
         } catch (error) {
             console.error('Blockchain.info API error:', error);
