@@ -34,8 +34,8 @@ export class ScalpingSignalGenerator {
         marketType: MarketType,
         signalType: SignalType
     ): Promise<Signal | null> {
-        // Get 5-minute candle data
-        const data = ScalpingMarketData.generateScalpingData(pair, marketType, 48);
+        // Get 5-minute candle data (now fetches real Binance prices)
+        const data = await ScalpingMarketData.generateScalpingData(pair, marketType, 48);
         const { prices, volumes } = data;
         const currentPrice = prices[prices.length - 1];
 

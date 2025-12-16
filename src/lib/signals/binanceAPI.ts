@@ -207,4 +207,58 @@ export class BinanceAPI {
             throw error;
         }
     }
+
+    /**
+     * Get scalping market data with real prices (5-minute candles)
+     * Optimized for short-term scalping signals
+     */
+    static async getScalpingMarketData(pair: string): Promise<{
+        currentPrice: number;
+        prices: number[];
+        volumes: number[];
+        highs: number[];
+        lows: number[];
+        timestamps: Date[];
+    }> {
+        try {
+            const symbol = this.pairToBinanceSymbol(pair);
+
+            // Get 5-minute klines (48 candles = 4 hours of data for scalping)
+            const klines = await this.getKlines(symbol, '5m', 48);
+
+            const prices: number[] = [];
+            const volumes: number[] = [];
+            const highs: number[] = [];
+            const lows: number[] = [];
+            const timestamps: Date[] = [];
+
+            for (const kline of klines) {
+                const closePrice = parseFloat(String(kline[4])); // Close price
+                const volume = parseFloat(String(kline[5])); // Volume
+                const highPrice = parseFloat(String(kline[2])); // High price
+                const lowPrice = parseFloat(String(kline[3])); // Low price
+                const timestamp = new Date(kline[0]); // Open time
+
+                prices.push(closePrice);
+                volumes.push(volume);
+                highs.push(highPrice);
+                lows.push(lowPrice);
+                timestamps.push(timestamp);
+            }
+
+            const currentPrice = prices[prices.length - 1];
+
+            return {
+                currentPrice,
+                prices,
+                volumes,
+                highs,
+                lows,
+                timestamps
+            };
+        } catch (error) {
+            // Silently fall back - scalpingMarketData.ts handles this gracefully
+            throw error;
+        }
+    }
 }

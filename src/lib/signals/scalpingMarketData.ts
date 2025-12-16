@@ -1,4 +1,5 @@
 import { MarketType } from './types';
+import { BinanceAPI } from './binanceAPI';
 
 /**
  * Scalping Market Data Generator
@@ -7,11 +8,37 @@ import { MarketType } from './types';
 export class ScalpingMarketData {
     /**
      * Generate 5-minute candle market data for scalping
+     * Fetches real Binance prices for crypto pairs, falls back to simulated data
      * @param pair Trading pair (e.g., 'BTC/USDT')
      * @param marketType CRYPTO or FOREX
      * @param candleCount Number of 5-min candles (default 48 = 4 hours)
      */
-    static generateScalpingData(pair: string, marketType: MarketType, candleCount: number = 48) {
+    static async generateScalpingData(pair: string, marketType: MarketType, candleCount: number = 48) {
+        // Try to fetch real Binance data for crypto pairs
+        if (marketType === MarketType.CRYPTO) {
+            try {
+                const binanceData = await BinanceAPI.getScalpingMarketData(pair);
+
+                return {
+                    pair,
+                    marketType,
+                    prices: binanceData.prices,
+                    volumes: binanceData.volumes,
+                    highs: binanceData.highs,
+                    lows: binanceData.lows,
+                    timeframe: '5m' as const,
+                    currentPrice: binanceData.currentPrice
+                };
+            } catch (error) {
+                // Gracefully fall back to simulated data
+                if (process.env.NODE_ENV === 'development') {
+                    console.info(`📊 Binance API unavailable for ${pair} (scalping) - using simulated data`);
+                }
+                // Continue to simulated data generation below
+            }
+        }
+
+        // Simulated data generation (fallback for FOREX or when Binance API fails)
         // Get base price for the pair
         const basePrice = this.getBasePrice(pair, marketType);
 
