@@ -9,7 +9,9 @@ import { Signal, SignalType, MarketType, SignalDirection, SignalStatus } from '@
 import { SignalDirectionFilter } from '@/components/ui/SignalDirectionFilter';
 import { ScalpingSignalGenerator } from '@/lib/signals/scalpingGenerator';
 import { MarketDataManager } from '@/lib/signals/marketData';
-import { TrendingUp, Target, Activity, Award, Zap } from 'lucide-react';
+import { SignalManager } from '@/lib/services/signalManager';
+import { AutoGenerator } from '@/lib/services/autoGenerator';
+import { TrendingUp, Target, Activity, Award, Zap, Clock } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 export default function ScalpingPage() {
@@ -21,98 +23,64 @@ export default function ScalpingPage() {
         // FUTURES: LONG + SHORT, SPOT: BUY only
         return [SignalDirection.LONG, SignalDirection.SHORT, SignalDirection.BUY];
     });
+    const [autoGenEnabled, setAutoGenEnabled] = useState(false);
+    const [nextGenTime, setNextGenTime] = useState(0);
     const { showSuccess, showError, showInfo } = useMessages();
 
-    // Update prices every 1 second (faster for scalping)
-    const updateScalpingPrices = useCallback(async () => {
-        if (signals.length === 0) return;
-
-        setSignals(prevSignals => {
-            return prevSignals.map(signal => {
-                // Simulate 5-min price movement (faster changes)
-                const change = (Math.random() - 0.5) * 0.002; // 0.2% max movement per second
-                const newPrice = signal.currentPrice * (1 + change);
-
-                // Check TP hits
-                const isLong = signal.direction === SignalDirection.LONG || signal.direction === SignalDirection.BUY;
-                const tp1Hit = isLong
-                    ? newPrice >= signal.takeProfit1!
-                    : newPrice <= signal.takeProfit1!;
-                const tp2Hit = isLong
-                    ? newPrice >= signal.takeProfit2!
-                    : newPrice <= signal.takeProfit2!;
-                const tp3Hit = isLong
-                    ? newPrice >= signal.takeProfit3!
-                    : newPrice <= signal.takeProfit3!;
-
-                // Calculate live RSI based on price change
-                const oldRsi = signal.currentRsi || signal.rsi || 50;
-                let newRsi = oldRsi;
-
-                // Adjust RSI: price up = RSI up, price down = RSI down
-                if (change > 0) {
-                    newRsi = Math.min(oldRsi + Math.abs(change) * 500, 100);
-                } else {
-                    newRsi = Math.max(oldRsi - Math.abs(change) * 500, 0);
-                }
-
-                // Add small random fluctuation
-                newRsi = Math.max(0, Math.min(100, newRsi + (Math.random() - 0.5) * 2));
-
-                const profitLoss = isLong
-                    ? ((newPrice - signal.entryPrice) / signal.entryPrice) * 100
-                    : ((signal.entryPrice - newPrice) / signal.entryPrice) * 100;
-
-                // Track TP hit times
-                const now = new Date();
-                const tp1HitTime = tp1Hit && !signal.tp1Hit ? now : signal.tp1HitTime;
-                const tp2HitTime = tp2Hit && !signal.tp2Hit ? now : signal.tp2HitTime;
-                const tp3HitTime = tp3Hit && !signal.tp3Hit ? now : signal.tp3HitTime;
-
-                const updatedSignal = {
-                    ...signal,
-                    currentPrice: newPrice,
-                    currentRsi: Math.round(newRsi),
-                    tp1Hit: signal.tp1Hit || tp1Hit,
-                    tp2Hit: signal.tp2Hit || tp2Hit,
-                    tp3Hit: signal.tp3Hit || tp3Hit,
-                    tp1HitTime,
-                    tp2HitTime,
-                    tp3HitTime,
-                    profitLossPercentage: profitLoss,
-                    status: (tp2Hit || tp3Hit) ? SignalStatus.COMPLETED : signal.status
-                };
-
-                // Save to completed signals when TP2/TP3 hits
-                if ((tp2Hit || tp3Hit) && signal.status !== SignalStatus.COMPLETED) {
-                    const completedSignals = JSON.parse(localStorage.getItem('completedSignals') || '[]');
-                    completedSignals.push({
-                        ...updatedSignal,
-                        completedAt: new Date().toISOString(),
-                        isScalping: true // Mark as scalping signal
-                    });
-                    localStorage.setItem('completedSignals', JSON.stringify(completedSignals));
-
-                    showSuccess(
-                        `⚡ Scalping TP Hit: ${signal.pair}`,
-                        `Profit: ${profitLoss.toFixed(2)}%`
-                    );
-                }
-
-                return updatedSignal;
-            });
-        });
-    }, [signals.length, showSuccess]);
-
+    // Load signals from SignalManager on mount and refresh every second
     useEffect(() => {
-        if (signals.length === 0) return;
+        const loadSignals = () => {
+            const activeSignals = SignalManager.getActiveSignals('scalping');
+            setSignals(activeSignals);
+        };
+
+        loadSignals();
+        const interval = setInterval(loadSignals, 1000);
+        return () => clearInterval(interval);
+    }, []);
+
+    // Check auto-generation status
+    useEffect(() => {
+        const prefs = SignalManager.getAutoGenPreferences();
+        setAutoGenEnabled(prefs.scalping.enabled);
+    }, []);
+
+    // Update next generation countdown
+    useEffect(() => {
+        if (!autoGenEnabled) return;
 
         const interval = setInterval(() => {
-            updateScalpingPrices();
-        }, 1000); // 1 second updates!
+            const timeLeft = AutoGenerator.timeUntilNext('scalping');
+            setNextGenTime(timeLeft);
+        }, 1000);
 
         return () => clearInterval(interval);
-    }, [signals.length, updateScalpingPrices]);
+    }, [autoGenEnabled]);
+
+    // AUTO-START: When market and type are selected, auto-enable generation and generate signals
+    useEffect(() => {
+        if (!selectedMarket || !selectedType) return;
+
+        // Check if we already have signals
+        const existingSignals = SignalManager.getActiveSignals('scalping');
+
+        // If no signals, generate them automatically
+        if (existingSignals.length === 0) {
+            console.log('🤖 Auto-starting scalping signal generation...');
+            generateScalpingSignals();
+        }
+
+        // Auto-enable auto-generation if not already enabled
+        if (!autoGenEnabled) {
+            console.log('🤖 Auto-enabling auto-generation for scalping...');
+            AutoGenerator.startAutoGeneration('scalping', {
+                market: selectedMarket,
+                signalType: selectedType,
+                enabled: true
+            });
+            setAutoGenEnabled(true);
+        }
+    }, [selectedMarket, selectedType]); // Run when market/type changes
 
     const generateScalpingSignals = async () => {
         if (!selectedMarket || !selectedType) return;
@@ -134,7 +102,8 @@ export default function ScalpingPage() {
                 signalTypeEnum
             );
 
-            setSignals(generatedSignals);
+            // Save to SignalManager instead of local state
+            SignalManager.setActiveSignals(generatedSignals, 'scalping');
             setIsLoading(false);
 
             if (generatedSignals.length > 0) {
@@ -278,6 +247,52 @@ export default function ScalpingPage() {
                                 icon={Target}
                                 trend={{ value: stats.avgProfit, isPositive: stats.avgProfit > 0 }}
                             />
+                        </div>
+
+                        {/* Auto-Generation Toggle */}
+                        <div className="mb-6 p-4 rounded-lg bg-card border border-border">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <Clock className="w-5 h-5 text-yellow-500" />
+                                    <div>
+                                        <h3 className="font-semibold">Auto-Generate Signals</h3>
+                                        <p className="text-sm text-muted-foreground">
+                                            {autoGenEnabled
+                                                ? `Next generation in ${Math.floor(nextGenTime / 60)}m ${nextGenTime % 60}s`
+                                                : 'Generate signals every 15 minutes automatically'
+                                            }
+                                        </p>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => {
+                                        if (!selectedMarket || !selectedType) {
+                                            showError('Select Options', 'Choose market and type first');
+                                            return;
+                                        }
+
+                                        if (autoGenEnabled) {
+                                            AutoGenerator.stopAutoGeneration('scalping');
+                                            setAutoGenEnabled(false);
+                                            showInfo('Auto-Gen Stopped', 'Stopped automatic generation');
+                                        } else {
+                                            AutoGenerator.startAutoGeneration('scalping', {
+                                                market: selectedMarket,
+                                                signalType: selectedType,
+                                                enabled: true
+                                            });
+                                            setAutoGenEnabled(true);
+                                            showSuccess('Auto-Gen Started', 'Signals will generate every 15 mins');
+                                        }
+                                    }}
+                                    className={`px-4 py-2 rounded-lg font-semibold transition-all ${autoGenEnabled
+                                        ? 'bg-red-500/20 text-red-500 hover:bg-red-500/30'
+                                        : 'bg-green-500/20 text-green-500 hover:bg-green-500/30'
+                                        }`}
+                                >
+                                    {autoGenEnabled ? 'Stop Auto-Gen' : 'Enable Auto-Gen'}
+                                </button>
+                            </div>
                         </div>
 
                         {/* Generate New Signals Button */}

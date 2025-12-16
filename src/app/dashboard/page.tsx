@@ -8,10 +8,12 @@ import { MessageBox, useMessages } from '@/components/ui/MessageBox';
 import { ConfidenceFilter, ConfidenceLevel, filterSignalsByConfidence } from '@/components/ui/ConfidenceFilter';
 import { SignalDirectionFilter } from '@/components/ui/SignalDirectionFilter';
 import { SignalNotifications, SignalNotification } from '@/components/ui/SignalNotifications';
-import { Signal, SignalType, MarketType, SignalDirection } from '@/lib/signals/types';
+import { Signal, SignalType, MarketType, SignalDirection, SignalStatus } from '@/lib/signals/types';
 import { SignalGenerator } from '@/lib/signals/generator';
 import { MarketDataManager } from '@/lib/signals/marketData';
-import { TrendingUp, Target, Activity, Award } from 'lucide-react';
+import { SignalManager } from '@/lib/services/signalManager';
+import { AutoGenerator } from '@/lib/services/autoGenerator';
+import { TrendingUp, Target, Activity, Award, Clock } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 export default function DashboardPage() {
@@ -21,6 +23,8 @@ export default function DashboardPage() {
     const [loadingStatus, setLoadingStatus] = useState('Initializing...'); // Status message
     const [selectedMarket, setSelectedMarket] = useState<'CRYPTO' | 'FOREX' | null>(null);
     const [selectedType, setSelectedType] = useState<'SPOT' | 'FUTURE' | null>(null);
+    const [autoGenEnabled, setAutoGenEnabled] = useState(false);
+    const [nextGenTime, setNextGenTime] = useState(0);
     const [selectedDirections, setSelectedDirections] = useState<SignalDirection[]>(() => {
         if (typeof window !== 'undefined') {
             const saved = localStorage.getItem('selectedDirections');
@@ -63,6 +67,55 @@ export default function DashboardPage() {
             setSelectedDirections([SignalDirection.LONG, SignalDirection.SHORT]);
         }
     }, [selectedType]);
+
+    // Check auto-generation status
+    useEffect(() => {
+        const prefs = SignalManager.getAutoGenPreferences();
+        setAutoGenEnabled(prefs.standard.enabled);
+    }, []);
+
+    // Update next generation countdown
+    useEffect(() => {
+        if (!autoGenEnabled) return;
+
+        const interval = setInterval(() => {
+            const timeLeft = AutoGenerator.timeUntilNext('standard');
+            setNextGenTime(timeLeft);
+        }, 1000);
+
+        return () => clearInterval(interval);
+    }, [autoGenEnabled]);
+
+    // AUTO-START: When market and type are selected, auto-enable generation and generate signals
+    useEffect(() => {
+        if (!selectedMarket || !selectedType) return;
+
+        // Check if we already have signals from this market/type
+        const existingSignals = signals.filter(s =>
+            (selectedMarket === 'CRYPTO' ? s.marketType === 'CRYPTO' : s.marketType === 'FOREX') &&
+            (selectedType === 'SPOT' ? s.signalType === 'SPOT' : s.signalType === 'FUTURE')
+        );
+
+        // If no matching signals, generate them automatically
+        if (existingSignals.length === 0 && !isLoading) {
+            console.log('🤖 Auto-starting dashboard signal generation...');
+            // Small delay to let UI settle
+            setTimeout(() => {
+                generateSignals();
+            }, 500);
+        }
+
+        // Auto-enable auto-generation if not already enabled
+        if (!autoGenEnabled) {
+            console.log('🤖 Auto-enabling auto-generation for dashboard...');
+            AutoGenerator.startAutoGeneration('standard', {
+                market: selectedMarket,
+                signalType: selectedType,
+                enabled: true
+            });
+            setAutoGenEnabled(true);
+        }
+    }, [selectedMarket, selectedType]); // Run when market/type changes
 
     // Apply confidence and direction filters
     const confidenceFilteredSignals = filterSignalsByConfidence(signals, selectedConfidence);
@@ -288,8 +341,8 @@ export default function DashboardPage() {
 
                         {/* Step 1: Select Market Type */}
                         <div>
-                            <p className="text-sm text-muted-foreground mb-2">Step 1: Select Market</p>
-                            <div className="flex gap-2 glass rounded-lg p-1 w-fit">
+                            <p className="text-sm text-muted-foreground mb-2">Step 1: Market</p>
+                            <div className="glass rounded-lg p-1 w-fit">
                                 <button
                                     onClick={() => {
                                         setSelectedMarket('CRYPTO');
@@ -297,31 +350,9 @@ export default function DashboardPage() {
                                         setSignals([]);
                                         setIsLoading(false);
                                     }}
-                                    className={`px-6 py-3 rounded-lg font-bold transition-all ${selectedMarket === 'CRYPTO'
-                                        ? 'bg-gradient-primary text-white shadow-lg'
-                                        : 'text-muted-foreground hover:text-foreground'
-                                        }`}
+                                    className="px-6 py-3 rounded-lg font-bold bg-gradient-primary text-white shadow-lg"
                                 >
-                                    Cryptocurrency
-                                </button>
-                                <button
-                                    onClick={() => {
-                                        setSelectedMarket('FOREX');
-                                        setSelectedType('SPOT'); // Forex only has SPOT
-                                        setSignals([]);
-                                        setIsLoading(false);
-                                        // Auto-load signals for Forex since no second step needed
-                                        setTimeout(() => {
-                                            generateSignals();
-                                            showInfo('FOREX SPOT Signals', 'Viewing live signals with 75%+ accuracy');
-                                        }, 100);
-                                    }}
-                                    className={`px-6 py-3 rounded-lg font-bold transition-all ${selectedMarket === 'FOREX'
-                                        ? 'bg-gradient-primary text-white shadow-lg'
-                                        : 'text-muted-foreground hover:text-foreground'
-                                        }`}
-                                >
-                                    Forex & Gold
+                                    Cryptocurrency (Real-time Prices)
                                 </button>
                             </div>
                         </div>
@@ -431,6 +462,52 @@ export default function DashboardPage() {
                     </div>
                 ) : (
                     <>
+                        {/* Auto-Generation Toggle */}
+                        <div className="glass rounded-lg p-4 mb-6">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <Clock className="w-5 h-5 text-blue-500" />
+                                    <div>
+                                        <h3 className="font-semibold">Auto-Generate Signals</h3>
+                                        <p className="text-sm text-muted-foreground">
+                                            {autoGenEnabled
+                                                ? `Next generation in ${Math.floor(nextGenTime / 60)}m ${nextGenTime % 60}s`
+                                                : 'Generate signals every 30 minutes automatically'
+                                            }
+                                        </p>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => {
+                                        if (!selectedMarket || !selectedType) {
+                                            return;
+                                        }
+
+                                        if (autoGenEnabled) {
+                                            AutoGenerator.stopAutoGeneration('standard');
+                                            setAutoGenEnabled(false);
+                                            showInfo('Auto-Gen Stopped', 'Stopped automatic generation');
+                                        } else {
+                                            AutoGenerator.startAutoGeneration('standard', {
+                                                market: selectedMarket,
+                                                signalType: selectedType,
+                                                enabled: true
+                                            });
+                                            setAutoGenEnabled(true);
+                                            showSuccess('Auto-Gen Started', 'Signals will generate every 30 mins');
+                                        }
+                                    }}
+                                    disabled={!selectedMarket || !selectedType}
+                                    className={`px-4 py-2 rounded-lg font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed ${autoGenEnabled
+                                        ? 'bg-red-500/20 text-red-500 hover:bg-red-500/30'
+                                        : 'bg-green-500/20 text-green-500 hover:bg-green-500/30'
+                                        }`}
+                                >
+                                    {autoGenEnabled ? 'Stop Auto-Gen' : 'Enable Auto-Gen'}
+                                </button>
+                            </div>
+                        </div>
+
                         {/* Filters & Actions Container */}
                         <div className="glass rounded-lg p-6 mb-6">
                             <div className="flex items-center justify-between mb-4">

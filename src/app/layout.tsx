@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
+import { SignalProvider } from "@/components/providers/SignalProvider";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -20,7 +21,11 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={inter.className} suppressHydrationWarning>
-      <body className="min-h-screen bg-background text-foreground antialiased">{children}</body>
+      <body className="min-h-screen bg-background text-foreground antialiased">
+        <SignalProvider>
+          {children}
+        </SignalProvider>
+      </body>
     </html>
   );
 }

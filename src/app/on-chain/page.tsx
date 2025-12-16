@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
@@ -5,10 +6,12 @@ import { Navbar } from '@/components/layout/Navbar';
 import { SignalList } from '@/components/ui/SignalList';
 import { StatsCard } from '@/components/ui/StatsCard';
 import { MessageBox, useMessages } from '@/components/ui/MessageBox';
-import { Signal, SignalDirection, SignalStatus } from '@/lib/signals/types';
+import { Signal, SignalDirection } from '@/lib/signals/types';
 import { SignalDirectionFilter } from '@/components/ui/SignalDirectionFilter';
 import { OnChainSignalGenerator } from '@/lib/signals/onChainGenerator';
-import { TrendingUp, Target, Activity, Award, Waves } from 'lucide-react';
+import { SignalManager } from '@/lib/services/signalManager';
+import { AutoGenerator } from '@/lib/services/autoGenerator';
+import { TrendingUp, Target, Activity, Award, Database, Clock, Waves } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 export default function OnChainPage() {
@@ -18,7 +21,62 @@ export default function OnChainPage() {
         SignalDirection.LONG,
         SignalDirection.SHORT
     ]);
+    const [autoGenEnabled, setAutoGenEnabled] = useState(false);
+    const [nextGenTime, setNextGenTime] = useState(0);
     const { showSuccess, showError, showInfo } = useMessages();
+
+    // Load signals from SignalManager
+    useEffect(() => {
+        const loadSignals = () => {
+            const activeSignals = SignalManager.getActiveSignals('onchain');
+            setSignals(activeSignals);
+        };
+
+        loadSignals();
+        const interval = setInterval(loadSignals, 1000);
+        return () => clearInterval(interval);
+    }, []);
+
+    // Check auto-generation status
+    useEffect(() => {
+        const prefs = SignalManager.getAutoGenPreferences();
+        setAutoGenEnabled(prefs.onchain.enabled);
+    }, []);
+
+    // Update next generation countdown
+    useEffect(() => {
+        if (!autoGenEnabled) return;
+
+        const interval = setInterval(() => {
+            const timeLeft = AutoGenerator.timeUntilNext('onchain');
+            setNextGenTime(timeLeft);
+        }, 1000);
+
+        return () => clearInterval(interval);
+    }, [autoGenEnabled]);
+
+    // AUTO-START: On-chain signals auto-generate on page load
+    useEffect(() => {
+        // Check if we already have signals
+        const existingSignals = SignalManager.getActiveSignals('onchain');
+
+        // If no signals, generate them automatically
+        if (existingSignals.length === 0) {
+            console.log('🤖 Auto-starting on-chain signal generation...');
+            generateSignals();
+        }
+
+        // Auto-enable auto-generation if not already enabled
+        if (!autoGenEnabled) {
+            console.log('🤖 Auto-enabling auto-generation for on-chain...');
+            AutoGenerator.startAutoGeneration('onchain', {
+                market: 'CRYPTO',
+                signalType: 'FUTURE',
+                enabled: true
+            });
+            setAutoGenEnabled(true);
+        }
+    }, []); // Run once on mount
 
     // Generate signals
     const generateSignals = useCallback(async () => {
@@ -27,143 +85,24 @@ export default function OnChainPage() {
         try {
             const generatedSignals = await OnChainSignalGenerator.generateOnChainSignals();
 
-            // Smart merge: Keep active signals, add new ones, remove old completed
-            setSignals(prevSignals => {
-                // Keep active signals from previous
-                const activeOldSignals = prevSignals.filter(s =>
-                    s.status === SignalStatus.ACTIVE && !s.tp2Hit && !s.tp3Hit
-                );
-
-                // Filter out duplicates (same pair + direction)
-                const newUniqueSignals = generatedSignals.filter(newSig =>
-                    !activeOldSignals.some(oldSig =>
-                        oldSig.pair === newSig.pair && oldSig.direction === newSig.direction
-                    )
-                );
-
-                // Merge: old active + new unique
-                return [...activeOldSignals, ...newUniqueSignals];
-            });
-
+            // Save to SignalManager instead of local state
+            SignalManager.setActiveSignals(generatedSignals, 'onchain');
             setIsLoading(false);
 
             if (generatedSignals.length > 0) {
                 showSuccess(
-                    `🐋 Refreshed: ${generatedSignals.length} new signals`,
-                    'Active signals preserved'
+                    `🐋 ${generatedSignals.length} On-Chain Signals`,
+                    'Whale movements detected!'
                 );
             } else {
-                showInfo('No New Signals', 'Active signals continue...');
+                showInfo('No Signals', 'Waiting for whale activity...');
             }
         } catch (error) {
             console.error('Error:', error);
             setIsLoading(false);
             showError('Generation Failed', 'Please try again');
         }
-    }, []);
-
-    // Auto-refresh every 30 seconds
-    useEffect(() => {
-        // Initial load
-        generateSignals();
-
-        // Set up interval for 30-second refresh
-        const interval = setInterval(() => {
-            generateSignals();
-        }, 30000); // 30 seconds
-
-        return () => clearInterval(interval);
-    }, []); // Empty dependency - only run once!
-
-    // Update prices every 10 seconds with REAL Binance data
-    const updatePrices = useCallback(async () => {
-        if (signals.length === 0) return;
-
-        try {
-            // Fetch ALL prices in parallel using Promise.all
-            const updatedSignals = await Promise.all(
-                signals.map(async (signal) => {
-                    try {
-                        // Fetch REAL price from Binance API
-                        const symbol = signal.pair.replace('/', ''); // BTC/USDT → BTCUSDT
-                        const response = await fetch(
-                            `https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`
-                        );
-
-                        let newPrice = signal.currentPrice; // Fallback to current
-
-                        if (response.ok) {
-                            const data = await response.json();
-                            newPrice = parseFloat(data.price);
-                        }
-
-                        // Check TP hits
-                        const isLong = signal.direction === SignalDirection.LONG;
-                        const tp1Hit = isLong
-                            ? newPrice >= signal.takeProfit1!
-                            : newPrice <= signal.takeProfit1!;
-                        const tp2Hit = isLong
-                            ? newPrice >= signal.takeProfit2!
-                            : newPrice <= signal.takeProfit2!;
-                        const tp3Hit = isLong
-                            ? newPrice >= signal.takeProfit3!
-                            : newPrice <= signal.takeProfit3!;
-
-                        const profitLoss = isLong
-                            ? ((newPrice - signal.entryPrice) / signal.entryPrice) * 100
-                            : ((signal.entryPrice - newPrice) / signal.entryPrice) * 100;
-
-                        const updatedSignal = {
-                            ...signal,
-                            currentPrice: newPrice,
-                            tp1Hit: signal.tp1Hit || tp1Hit,
-                            tp2Hit: signal.tp2Hit || tp2Hit,
-                            tp3Hit: signal.tp3Hit || tp3Hit,
-                            profitLossPercentage: profitLoss,
-                            status: (tp2Hit || tp3Hit) ? SignalStatus.COMPLETED : signal.status
-                        };
-
-                        // Save completed signals
-                        if ((tp2Hit || tp3Hit) && signal.status !== SignalStatus.COMPLETED) {
-                            const completedSignals = JSON.parse(localStorage.getItem('completedSignals') || '[]');
-                            completedSignals.push({
-                                ...updatedSignal,
-                                completedAt: new Date().toISOString(),
-                                tp2HitTime: tp2Hit ? new Date() : signal.tp2HitTime,
-                                tp3HitTime: tp3Hit ? new Date() : signal.tp3HitTime
-                            });
-                            localStorage.setItem('completedSignals', JSON.stringify(completedSignals));
-
-                            showSuccess(
-                                `🐋 On-Chain TP Hit: ${signal.pair}`,
-                                `Profit: ${profitLoss.toFixed(2)}%`
-                            );
-                        }
-
-                        return updatedSignal;
-                    } catch (error) {
-                        console.warn(`Price update failed for ${signal.pair}:`, error);
-                        return signal; // Keep unchanged on error
-                    }
-                })
-            );
-
-            // Update state with all new prices at once
-            setSignals(updatedSignals);
-        } catch (error) {
-            console.error('Price update error:', error);
-        }
-    }, [signals, showSuccess]);
-
-    useEffect(() => {
-        if (signals.length === 0) return;
-
-        const interval = setInterval(() => {
-            updatePrices();
-        }, 10000); // 10 seconds - real Binance prices
-
-        return () => clearInterval(interval);
-    }, [signals, showSuccess]); // Only re-run when signals count changes
+    }, [showSuccess, showError, showInfo]);
 
     // Calculate stats
     const filteredSignals = signals.filter(signal =>
@@ -241,6 +180,47 @@ export default function OnChainPage() {
                         icon={Target}
                         trend={{ value: stats.avgConfidence, isPositive: stats.avgConfidence >= 75 }}
                     />
+                </div>
+
+                {/* Auto-Generation Toggle */}
+                <div className="glass rounded-lg p-4 mb-6">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                            <Clock className="w-5 h-5 text-purple-500" />
+                            <div>
+                                <h3 className="font-semibold">Auto-Generate Signals</h3>
+                                <p className="text-sm text-muted-foreground">
+                                    {autoGenEnabled
+                                        ? `Next generation in ${Math.floor(nextGenTime / 60)}m ${nextGenTime % 60}s`
+                                        : 'Generate signals every 45 minutes automatically'
+                                    }
+                                </p>
+                            </div>
+                        </div>
+                        <button
+                            onClick={() => {
+                                if (autoGenEnabled) {
+                                    AutoGenerator.stopAutoGeneration('onchain');
+                                    setAutoGenEnabled(false);
+                                    showInfo('Auto-Gen Stopped', 'Stopped automatic generation');
+                                } else {
+                                    AutoGenerator.startAutoGeneration('onchain', {
+                                        market: 'CRYPTO',
+                                        signalType: 'FUTURE',
+                                        enabled: true
+                                    });
+                                    setAutoGenEnabled(true);
+                                    showSuccess('Auto-Gen Started', 'Signals will generate every 45 mins');
+                                }
+                            }}
+                            className={`px-4 py-2 rounded-lg font-semibold transition-all ${autoGenEnabled
+                                ? 'bg-red-500/20 text-red-500 hover:bg-red-500/30'
+                                : 'bg-green-500/20 text-green-500 hover:bg-green-500/30'
+                                }`}
+                        >
+                            {autoGenEnabled ? 'Stop Auto-Gen' : 'Enable Auto-Gen'}
+                        </button>
+                    </div>
                 </div>
 
                 {/* Generate Button */}

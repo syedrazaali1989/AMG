@@ -353,11 +353,11 @@ export class SignalGenerator {
             const slMultiplier = 1.5 - (confidenceMultiplier * 0.3);
             stopLoss = entryPrice - (atr * slMultiplier);
 
-            // Take profit: wider for high confidence and bullish sentiment
-            let tpMultiplier = 2.5 + (confidenceMultiplier * 1.5);
+            // Take profit: INCREASED by 50% for better targets
+            let tpMultiplier = 3.5 + (confidenceMultiplier * 2.5); // Was 2.5 + 1.5, now 3.5 + 2.5
             if (sentimentScore.overall > 30) {
                 // Bullish news supports higher TP
-                tpMultiplier += sentimentAdjustment * 1.5;
+                tpMultiplier += sentimentAdjustment * 2; // Was 1.5, now 2
             }
             takeProfit = entryPrice + (atr * tpMultiplier);
 
@@ -375,11 +375,11 @@ export class SignalGenerator {
             const slMultiplier = 1.5 - (confidenceMultiplier * 0.3);
             stopLoss = entryPrice + (atr * slMultiplier);
 
-            // Take profit: wider for high confidence and bearish sentiment
-            let tpMultiplier = 2.5 + (confidenceMultiplier * 1.5);
+            // Take profit: INCREASED by 50% for better targets
+            let tpMultiplier = 3.5 + (confidenceMultiplier * 2.5); // Was 2.5 + 1.5, now 3.5 + 2.5
             if (sentimentScore.overall < -30) {
                 // Bearish news supports lower TP
-                tpMultiplier += sentimentAdjustment * 1.5;
+                tpMultiplier += sentimentAdjustment * 2; // Was 1.5, now 2
             }
             takeProfit = entryPrice - (atr * tpMultiplier);
 

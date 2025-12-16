@@ -55,6 +55,20 @@ export default function CompletedSignalsPage() {
                         signal.tp3Hit = true;
                     }
 
+                    // Migrate missing TP1 hit time (if TP1 was hit but no time recorded)
+                    if (signal.tp1Hit && !signal.tp1HitTime) {
+                        // Estimate TP1 time based on completion time or TP2 time
+                        if (signal.tp2HitTime) {
+                            // TP1 was hit before TP2, estimate ~30 seconds earlier
+                            const tp2Time = new Date(signal.tp2HitTime);
+                            signal.tp1HitTime = new Date(tp2Time.getTime() - 30000); // 30 seconds before TP2
+                        } else if (signal.completedAt) {
+                            // Estimate TP1 as ~1 minute before completion
+                            const completedTime = new Date(signal.completedAt);
+                            signal.tp1HitTime = new Date(completedTime.getTime() - 60000); // 1 minute before completion
+                        }
+                    }
+
                     // Generate unique key (deterministic to avoid hydration mismatch)
                     const timestamp = signal.completedAt || new Date().toISOString();
                     signal.uniqueKey = `signal-${signal.id}-${index}-${timestamp.replace(/[:.]/g, '')}`;
@@ -91,43 +105,42 @@ export default function CompletedSignalsPage() {
                 )
                 : completedSignals;
 
-    // Separate scalping and regular signals from filtered
+    // Separate signals by type for 'All' filter
+    const standardSignals = filteredSignals.filter((s: any) =>
+        s.isScalping !== true &&
+        !s.id.startsWith('ONCHAIN') &&
+        !s.id.startsWith('CORR')
+    );
     const scalpingSignals = filteredSignals.filter((s: any) => s.isScalping === true);
-    const regularSignals = filteredSignals.filter((s: any) => s.isScalping !== true);
+    const onchainSignals = filteredSignals.filter((s: any) =>
+        s.id.startsWith('ONCHAIN') || s.id.startsWith('CORR')
+    );
+
+    // Group signals by date for each type
+    const groupByDate = (signals: any[]) => {
+        return signals.reduce((groups: any, signal) => {
+            const date = new Date(signal.completedAt).toLocaleDateString('en-US', {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
+            });
+            if (!groups[date]) {
+                groups[date] = [];
+            }
+            groups[date].push(signal);
+            return groups;
+        }, {});
+    };
+
+    const standardGroupedByDate = groupByDate(standardSignals);
+    const scalpingGroupedByDate = groupByDate(scalpingSignals);
+    const onchainGroupedByDate = groupByDate(onchainSignals);
 
     // Calculate stats for filtered signals
     const profitableSignals = filteredSignals.filter(s => (s.profitLossPercentage || 0) > 0);
     const totalProfit = filteredSignals.reduce((sum, s) => sum + (s.profitLossPercentage || 0), 0);
     const avgProfit = filteredSignals.length > 0 ? totalProfit / filteredSignals.length : 0;
     const winRate = filteredSignals.length > 0 ? (profitableSignals.length / filteredSignals.length) * 100 : 0;
-
-    // Group scalping signals by date
-    const scalpingGroupedByDate = scalpingSignals.reduce((groups: any, signal) => {
-        const date = new Date(signal.completedAt).toLocaleDateString('en-US', {
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric'
-        });
-        if (!groups[date]) {
-            groups[date] = [];
-        }
-        groups[date].push(signal);
-        return groups;
-    }, {});
-
-    // Group regular signals by date
-    const regularGroupedByDate = regularSignals.reduce((groups: any, signal) => {
-        const date = new Date(signal.completedAt).toLocaleDateString('en-US', {
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric'
-        });
-        if (!groups[date]) {
-            groups[date] = [];
-        }
-        groups[date].push(signal);
-        return groups;
-    }, {});
 
     if (!mounted) {
         return null; // Prevent hydration mismatch
@@ -179,10 +192,10 @@ export default function CompletedSignalsPage() {
                     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }} className="glass rounded-lg p-4">
                         <div className="flex items-center gap-2 mb-2">
                             <TrendingUp className="w-4 h-4 text-primary" />
-                            <span className="text-sm text-muted-foreground">Avg Profit</span>
+                            <span className="text-sm text-muted-foreground">Total Profit</span>
                         </div>
-                        <div className={`text-2xl font-bold ${avgProfit > 0 ? 'text-success' : 'text-danger'}`}>
-                            {avgProfit > 0 ? '+' : ''}{avgProfit.toFixed(2)}%
+                        <div className={`text-2xl font-bold ${totalProfit > 0 ? 'text-success' : 'text-danger'}`}>
+                            {totalProfit > 0 ? '+' : ''}{totalProfit.toFixed(2)}%
                         </div>
                     </motion.div>
                 </div>
@@ -246,73 +259,129 @@ export default function CompletedSignalsPage() {
                 {/* Signals Sections */}
                 {/* Signals Display */}
                 {filteredSignals.length > 0 ? (
-                    <div className="space-y-12">
-                        {/* Scalping Signals Section */}
-                        {scalpingSignals.length > 0 && (
-                            <div>
-                                <div className="flex items-center gap-3 mb-6">
-                                    <div className="p-2 rounded-lg bg-yellow-500/10 border border-yellow-500/30">
-                                        <span className="text-2xl">⚡</span>
-                                    </div>
-                                    <div>
-                                        <h2 className="text-2xl font-bold text-yellow-500">Scalping Signals</h2>
-                                        <p className="text-sm text-muted-foreground">Quick profit targets (1-3%)</p>
+                    activeFilter === 'all' ? (
+                        // For 'All' filter: Show all signals mixed by date without section headings
+                        <div className="space-y-8">
+                            {Object.entries(groupByDate(filteredSignals)).map(([date, signals]: [string, any]) => (
+                                <div key={`all-${date}`}>
+                                    <h3 className="text-lg font-semibold mb-4 text-primary/70">{date}</h3>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                        {signals.map((signal: any) => (
+                                            <motion.div
+                                                key={signal.uniqueKey}
+                                                initial={{ opacity: 0, y: 20 }}
+                                                animate={{ opacity: 1, y: 0 }}
+                                            >
+                                                <SignalCard signal={signal} />
+                                            </motion.div>
+                                        ))}
                                     </div>
                                 </div>
-                                <div className="space-y-8">
-                                    {Object.entries(scalpingGroupedByDate).map(([date, signals]: [string, any]) => (
-                                        <div key={`scalping-${date}`}>
-                                            <h3 className="text-lg font-semibold mb-4 text-yellow-500/70">{date}</h3>
-                                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                                {signals.map((signal: any) => (
-                                                    <motion.div
-                                                        key={signal.uniqueKey}
-                                                        initial={{ opacity: 0, y: 20 }}
-                                                        animate={{ opacity: 1, y: 0 }}
-                                                    >
-                                                        <SignalCard signal={signal} />
-                                                    </motion.div>
-                                                ))}
-                                            </div>
+                            ))}
+                        </div>
+                    ) : (
+                        // For specific filters: Show with section headings
+                        <div className="space-y-12">
+                            {/* Standard Signals Section */}
+                            {activeFilter === 'standard' && standardSignals.length > 0 && (
+                                <div>
+                                    <div className="flex items-center gap-3 mb-6">
+                                        <div className="p-2 rounded-lg bg-blue-500/10 border border-blue-500/30">
+                                            <TrendingUp className="w-6 h-6 text-blue-500" />
                                         </div>
-                                    ))}
+                                        <div>
+                                            <h2 className="text-2xl font-bold text-blue-500">Standard Signals</h2>
+                                            <p className="text-sm text-muted-foreground">Medium-term trading signals</p>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-8">
+                                        {Object.entries(standardGroupedByDate).map(([date, signals]: [string, any]) => (
+                                            <div key={`standard-${date}`}>
+                                                <h3 className="text-lg font-semibold mb-4 text-blue-500/70">{date}</h3>
+                                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                                    {signals.map((signal: any) => (
+                                                        <motion.div
+                                                            key={signal.uniqueKey}
+                                                            initial={{ opacity: 0, y: 20 }}
+                                                            animate={{ opacity: 1, y: 0 }}
+                                                        >
+                                                            <SignalCard signal={signal} />
+                                                        </motion.div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
                                 </div>
-                            </div>
-                        )}
+                            )}
 
-                        {/* Regular Signals Section */}
-                        {regularSignals.length > 0 && (
-                            <div>
-                                <div className="flex items-center gap-3 mb-6">
-                                    <div className="p-2 rounded-lg bg-primary/10 border border-primary/30">
-                                        <Trophy className="w-6 h-6 text-primary" />
-                                    </div>
-                                    <div>
-                                        <h2 className="text-2xl font-bold text-gradient">Regular Signals</h2>
-                                        <p className="text-sm text-muted-foreground">Standard trading signals</p>
-                                    </div>
-                                </div>
-                                <div className="space-y-8">
-                                    {Object.entries(regularGroupedByDate).map(([date, signals]: [string, any]) => (
-                                        <div key={`regular-${date}`}>
-                                            <h3 className="text-lg font-semibold mb-4 text-primary/70">{date}</h3>
-                                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                                {signals.map((signal: any) => (
-                                                    <motion.div
-                                                        key={signal.uniqueKey}
-                                                        initial={{ opacity: 0, y: 20 }}
-                                                        animate={{ opacity: 1, y: 0 }}
-                                                    >
-                                                        <SignalCard signal={signal} />
-                                                    </motion.div>
-                                                ))}
-                                            </div>
+                            {/* Scalping Signals Section */}
+                            {activeFilter === 'scalping' && scalpingSignals.length > 0 && (
+                                <div>
+                                    <div className="flex items-center gap-3 mb-6">
+                                        <div className="p-2 rounded-lg bg-yellow-500/10 border border-yellow-500/30">
+                                            <span className="text-2xl">⚡</span>
                                         </div>
-                                    ))}
+                                        <div>
+                                            <h2 className="text-2xl font-bold text-yellow-500">Scalping Signals</h2>
+                                            <p className="text-sm text-muted-foreground">Quick profit targets (1-3%)</p>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-8">
+                                        {Object.entries(scalpingGroupedByDate).map(([date, signals]: [string, any]) => (
+                                            <div key={`scalping-${date}`}>
+                                                <h3 className="text-lg font-semibold mb-4 text-yellow-500/70">{date}</h3>
+                                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                                    {signals.map((signal: any) => (
+                                                        <motion.div
+                                                            key={signal.uniqueKey}
+                                                            initial={{ opacity: 0, y: 20 }}
+                                                            animate={{ opacity: 1, y: 0 }}
+                                                        >
+                                                            <SignalCard signal={signal} />
+                                                        </motion.div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
                                 </div>
-                            </div>
-                        )}
-                    </div>
+                            )}
+
+                            {/* On-Chain Signals Section */}
+                            {activeFilter === 'onchain' && onchainSignals.length > 0 && (
+                                <div>
+                                    <div className="flex items-center gap-3 mb-6">
+                                        <div className="p-2 rounded-lg bg-orange-500/10 border border-orange-500/30">
+                                            <Trophy className="w-6 h-6 text-orange-500" />
+                                        </div>
+                                        <div>
+                                            <h2 className="text-2xl font-bold text-orange-500">On-Chain Signals</h2>
+                                            <p className="text-sm text-muted-foreground">Whale movement signals</p>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-8">
+                                        {Object.entries(onchainGroupedByDate).map(([date, signals]: [string, any]) => (
+                                            <div key={`onchain-${date}`}>
+                                                <h3 className="text-lg font-semibold mb-4 text-orange-500/70">{date}</h3>
+                                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                                    {signals.map((signal: any) => (
+                                                        <motion.div
+                                                            key={signal.uniqueKey}
+                                                            initial={{ opacity: 0, y: 20 }}
+                                                            animate={{ opacity: 1, y: 0 }}
+                                                        >
+                                                            <SignalCard signal={signal} />
+                                                        </motion.div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )
                 ) : (
                     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center py-16">
                         <Trophy className="w-16 h-16 mx-auto mb-4 text-muted-foreground opacity-50" />
