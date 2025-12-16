@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { Navbar } from '@/components/layout/Navbar';
 import { SignalList } from '@/components/ui/SignalList';
 import { StatsCard } from '@/components/ui/StatsCard';
@@ -11,6 +11,8 @@ import { ScalpingSignalGenerator } from '@/lib/signals/scalpingGenerator';
 import { MarketDataManager } from '@/lib/signals/marketData';
 import { SignalManager } from '@/lib/services/signalManager';
 import { AutoGenerator } from '@/lib/services/autoGenerator';
+import { SignalCatchup } from '@/lib/services/signalCatchup';
+import { useSignals } from '@/hooks/useSignals';
 import { TrendingUp, Target, Activity, Award, Zap, Clock } from 'lucide-react';
 import { motion } from 'framer-motion';
 
@@ -23,6 +25,35 @@ export default function ScalpingPage() {
         // FUTURES: LONG + SHORT, SPOT: BUY only
         return [SignalDirection.LONG, SignalDirection.SHORT, SignalDirection.BUY];
     });
+
+    // Auto-migrate old signals to new SignalManager format (one-time fix)
+    useEffect(() => {
+        try {
+            const oldScalpingSignals = localStorage.getItem('scalpingSignals');
+            if (oldScalpingSignals && oldScalpingSignals !== '[]') {
+                console.log('🔄 Migrating old scalping signals to new format...');
+                const oldSignals = JSON.parse(oldScalpingSignals);
+
+                // Check if activeSignals already has them
+                const currentSignals = SignalManager.getActiveSignals('scalping');
+                if (currentSignals.length === 0 && oldSignals.length > 0) {
+                    // Migrate old signals
+                    SignalManager.setActiveSignals(oldSignals, 'scalping');
+                    console.log(`✅ Migrated ${oldSignals.length} scalping signals`);
+
+                    // Clear old storage
+                    localStorage.removeItem('scalpingSignals');
+                }
+            }
+        } catch (error) {
+            console.error('Migration error:', error);
+        }
+
+        // INSTANT CATCH-UP: Check all signals against current prices
+        SignalCatchup.catchupAllSignals().catch(err => {
+            console.error('Catch-up error:', err);
+        });
+    }, []);
     const [autoGenEnabled, setAutoGenEnabled] = useState(false);
     const [nextGenTime, setNextGenTime] = useState(0);
     const { showSuccess, showError, showInfo } = useMessages();

@@ -24,6 +24,25 @@ export default function DashboardPage() {
     const [selectedMarket, setSelectedMarket] = useState<'CRYPTO' | 'FOREX' | null>(null);
     const [selectedType, setSelectedType] = useState<'SPOT' | 'FUTURE' | null>(null);
     const [autoGenEnabled, setAutoGenEnabled] = useState(false);
+
+    // Auto-migrate old signals to new SignalManager format
+    useEffect(() => {
+        try {
+            const oldSignals = localStorage.getItem('signals');
+            if (oldSignals && oldSignals !== '[]') {
+                console.log('🔄 Migrating old standard signals...');
+                const parsed = JSON.parse(oldSignals);
+                const currentSignals = SignalManager.getActiveSignals('standard');
+                if (currentSignals.length === 0 && parsed.length > 0) {
+                    SignalManager.setActiveSignals(parsed, 'standard');
+                    console.log(`✅ Migrated ${parsed.length} standard signals`);
+                    localStorage.removeItem('signals');
+                }
+            }
+        } catch (error) {
+            console.error('Migration error:', error);
+        }
+    }, []);
     const [nextGenTime, setNextGenTime] = useState(0);
     const [selectedDirections, setSelectedDirections] = useState<SignalDirection[]>(() => {
         if (typeof window !== 'undefined') {

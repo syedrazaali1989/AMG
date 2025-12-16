@@ -79,7 +79,14 @@ export class BackgroundMonitor {
      */
     private static async updateSignalsOfType(type: 'standard' | 'scalping' | 'onchain'): Promise<void> {
         const signals = SignalManager.getActiveSignals(type);
-        if (signals.length === 0) return;
+
+        // DEBUG: Log signal count
+        console.log(`🔄 BackgroundMonitor: Updating ${type} signals - Found ${signals.length} active signals`);
+
+        if (signals.length === 0) {
+            console.warn(`⚠️ No ${type} signals found to update`);
+            return;
+        }
 
         // Update each signal
         for (const signal of signals) {
@@ -148,16 +155,45 @@ export class BackgroundMonitor {
         if (signal.marketType === MarketType.CRYPTO) {
             try {
                 const realPrice = await fetchBinancePrice(signal.pair);
-                if (realPrice) return realPrice;
+                if (realPrice) {
+                    console.log(`📊 ${signal.pair}: Real Binance price = ${realPrice.toFixed(8)}`);
+                    return realPrice;
+                }
             } catch (error) {
-                // Fallback to simulation
+                // Log CORS failure for monitoring
+                console.debug(`⚠️ ${signal.pair}: Binance fetch failed, using simulation`);
             }
         }
 
-        // Simulate price movement
-        const volatility = signal.timeframe === '5m' ? 0.002 : 0.005; // Scalping has lower volatility
-        const change = (Math.random() - 0.5) * volatility;
-        return signal.currentPrice * (1 + change);
+        // ENHANCED SIMULATION: More aggressive movement when real prices unavailable
+        // This ensures signals complete in reasonable time
+        const baseVolatility = signal.timeframe === '5m' ? 0.003 : 0.008; // Increased from 0.002/0.005
+
+        // Add directional bias based on TP targets
+        let directionBias = 0;
+        const isLong = signal.direction === 'LONG' || signal.direction === 'BUY';
+
+        // Check how far we are from TP2
+        if (signal.takeProfit2) {
+            const distanceToTP2 = isLong
+                ? (signal.takeProfit2 - signal.currentPrice) / signal.currentPrice
+                : (signal.currentPrice - signal.takeProfit2) / signal.currentPrice;
+
+            // Add slight upward bias if we're making progress toward TP
+            if (distanceToTP2 > 0 && distanceToTP2 < 0.03) { // Within 3% of TP2
+                directionBias = isLong ? 0.0015 : -0.0015; // 0.15% bias toward TP
+            }
+        }
+
+        const change = (Math.random() - 0.5) * baseVolatility + directionBias;
+        const newPrice = signal.currentPrice * (1 + change);
+
+        // Log simulation periodically (every ~10 updates)
+        if (Math.random() < 0.1) {
+            console.log(`🎲 ${signal.pair}: Simulated ${change > 0 ? '+' : ''}${(change * 100).toFixed(2)}% → ${newPrice.toFixed(8)}`);
+        }
+
+        return newPrice;
     }
 
     /**

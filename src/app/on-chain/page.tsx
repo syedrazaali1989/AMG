@@ -23,6 +23,25 @@ export default function OnChainPage() {
     ]);
     const [autoGenEnabled, setAutoGenEnabled] = useState(false);
     const [nextGenTime, setNextGenTime] = useState(0);
+
+    // Auto-migrate old signals to new SignalManager format
+    useEffect(() => {
+        try {
+            const oldSignals = localStorage.getItem('onchainSignals');
+            if (oldSignals && oldSignals !== '[]') {
+                console.log('🔄 Migrating old on-chain signals...');
+                const parsed = JSON.parse(oldSignals);
+                const currentSignals = SignalManager.getActiveSignals('onchain');
+                if (currentSignals.length === 0 && parsed.length > 0) {
+                    SignalManager.setActiveSignals(parsed, 'onchain');
+                    console.log(`✅ Migrated ${parsed.length} on-chain signals`);
+                    localStorage.removeItem('onchainSignals');
+                }
+            }
+        } catch (error) {
+            console.error('Migration error:', error);
+        }
+    }, []);
     const { showSuccess, showError, showInfo } = useMessages();
 
     // Load signals from SignalManager

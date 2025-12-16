@@ -66,6 +66,13 @@ export class SignalGenerator {
     ): Promise<Signal | null> {
         const { prices, volumes, pair, marketType, currentPrice } = marketData;
 
+        // FILTER: Reject extremely low-priced coins (< $0.0001)
+        // These display as 0.0000 and create confusing signals
+        if (currentPrice < 0.0001) {
+            console.log(`⚠️ Skipping ${pair} - price too low (${currentPrice})`);
+            return null;
+        }
+
         // Calculate all technical indicators
         const rsi = TechnicalIndicators.calculateRSI(prices);
         const macd = TechnicalIndicators.calculateMACD(prices);
