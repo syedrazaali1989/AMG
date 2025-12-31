@@ -37,16 +37,38 @@ export class SignalManager {
 
             const allSignals: ActiveSignals = JSON.parse(stored);
 
-            if (type) {
-                return allSignals[type] || [];
+            // Ensure structure is valid
+            if (!allSignals || typeof allSignals !== 'object') {
+                return [];
             }
 
-            // Return all signals
-            return [
-                ...allSignals.standard,
-                ...allSignals.scalping,
-                ...allSignals.onchain
-            ];
+            let signals: Signal[] = [];
+            if (type) {
+                signals = Array.isArray(allSignals[type]) ? allSignals[type] : [];
+            } else {
+                // Return all signals
+                signals = [
+                    ...(Array.isArray(allSignals.standard) ? allSignals.standard : []),
+                    ...(Array.isArray(allSignals.scalping) ? allSignals.scalping : []),
+                    ...(Array.isArray(allSignals.onchain) ? allSignals.onchain : [])
+                ];
+            }
+
+            // Return empty if no signals
+            if (!signals || signals.length === 0) {
+                return [];
+            }
+
+            // IMPORTANT: Return fresh array with reconstructed Date objects
+            // This ensures React detects changes when prices update
+            return signals.map(signal => ({
+                ...signal,
+                timestamp: new Date(signal.timestamp),
+                expiresAt: signal.expiresAt ? new Date(signal.expiresAt) : undefined,
+                tp1HitTime: signal.tp1HitTime ? new Date(signal.tp1HitTime) : undefined,
+                tp2HitTime: signal.tp2HitTime ? new Date(signal.tp2HitTime) : undefined,
+                tp3HitTime: signal.tp3HitTime ? new Date(signal.tp3HitTime) : undefined,
+            }));
         } catch (error) {
             console.error('Error loading active signals:', error);
             return [];

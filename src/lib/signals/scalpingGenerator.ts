@@ -39,6 +39,19 @@ export class ScalpingSignalGenerator {
         const { prices, volumes } = data;
         const currentPrice = prices[prices.length - 1];
 
+        // COMPREHENSIVE PRICE VALIDATION
+        // Filter out invalid prices that would show as 0.0000 or cause errors
+        if (!currentPrice || isNaN(currentPrice) || !isFinite(currentPrice) || currentPrice <= 0) {
+            console.log(`⚠️ Skipping ${pair} - invalid price (${currentPrice})`);
+            return null;
+        }
+
+        // Reject extremely low-priced coins (< $0.0001)
+        if (currentPrice < 0.0001) {
+            console.log(`⚠️ Skipping ${pair} - price too low (${currentPrice})`);
+            return null;
+        }
+
         // Calculate fast indicators for scalping
         const rsi = this.calculateFastRSI(prices, 7); // 7-period RSI (faster)
         const macd = this.calculateFastMACD(prices); // Faster MACD

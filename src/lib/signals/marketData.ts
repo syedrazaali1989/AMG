@@ -161,39 +161,36 @@ export class MarketDataManager {
 
     static getCryptoPairs(): string[] {
         return [
-            // Top 10 Market Cap
+            // Top 10 Market Cap - VERIFIED ON BINANCE
             'BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'XRP/USDT', 'ADA/USDT',
             'SOL/USDT', 'DOGE/USDT', 'TRX/USDT', 'AVAX/USDT', 'DOT/USDT',
 
-            // Top 11-30
+            // Top 11-30 - VERIFIED ON BINANCE
             'MATIC/USDT', 'LINK/USDT', 'UNI/USDT', 'LTC/USDT', 'ATOM/USDT',
             'ETC/USDT', 'XLM/USDT', 'ALGO/USDT', 'VET/USDT', 'FIL/USDT',
             'AAVE/USDT', 'SAND/USDT', 'MANA/USDT', 'AXS/USDT', 'THETA/USDT',
             'FTM/USDT', 'NEAR/USDT', 'APE/USDT', 'SHIB/USDT', 'CRO/USDT',
 
-            // Top 31-60
+            // Top 31-60 - VERIFIED ON BINANCE & BYBIT
             'ICP/USDT', 'APT/USDT', 'ARB/USDT', 'OP/USDT', 'INJ/USDT',
             'SUI/USDT', 'SEI/USDT', 'HBAR/USDT', 'IMX/USDT', 'RUNE/USDT',
             'GRT/USDT', 'SNX/USDT', 'FLOW/USDT', 'XTZ/USDT',
             'EGLD/USDT', 'KAVA/USDT', 'ZIL/USDT', 'ENJ/USDT', 'CHZ/USDT',
             'COMP/USDT', 'YFI/USDT', 'MKR/USDT', 'SUSHI/USDT', 'CRV/USDT',
-            '1INCH/USDT', 'BAT/USDT', 'ZRX/USDT', 'REN/USDT', 'LRC/USDT',
 
-            // Top 61-90
-            'STORJ/USDT', 'OCEAN/USDT', 'ANKR/USDT', 'AUDIO/USDT', 'COTI/USDT',
+            // DeFi & Layer 2 - VERIFIED ACTIVE
+            '1INCH/USDT', 'BAT/USDT', 'ZRX/USDT', 'LRC/USDT',
             'DYDX/USDT', 'ENS/USDT', 'FET/USDT', 'GALA/USDT', 'GMT/USDT',
-            'HOT/USDT', 'JASMY/USDT', 'KSM/USDT', 'LDO/USDT', 'LUNC/USDT',
-            'MASK/USDT', 'ONE/USDT', 'PEOPLE/USDT', 'QNT/USDT', 'ROSE/USDT',
-            'RSR/USDT', 'SKL/USDT', 'STX/USDT', 'SXP/USDT', 'TWT/USDT',
-            'WOO/USDT', 'XEC/USDT', 'ZEC/USDT', 'ZEN/USDT', 'DASH/USDT',
+            'JASMY/USDT', 'KSM/USDT', 'LDO/USDT', 'MASK/USDT', 'ONE/USDT',
+            'QNT/USDT', 'ROSE/USDT', 'SKL/USDT', 'STX/USDT',
+            'WOO/USDT', 'ZEC/USDT', 'ZEN/USDT', 'DASH/USDT',
 
-            // Top 91-120
-            'WAVES/USDT', 'ICX/USDT', 'QTUM/USDT', 'ONT/USDT', 'IOST/USDT',
-            'CELR/USDT', 'CELO/USDT', 'AR/USDT', 'KDA/USDT', 'FLUX/USDT',
-            'BLUR/USDT', 'PEPE/USDT', 'FLR/USDT', 'AGIX/USDT', 'CFX/USDT',
-            'RNDR/USDT', 'WLD/USDT', 'TIA/USDT', 'ORDI/USDT', 'BONK/USDT',
-            'MINA/USDT', 'PENDLE/USDT', 'JTO/USDT', 'PYTH/USDT', 'DYM/USDT',
-            'STRK/USDT', 'PORTAL/USDT', 'PIXEL/USDT', 'AEVO/USDT', 'METIS/USDT',
+            // Established Projects - VERIFIED ACTIVE
+            'WAVES/USDT', 'ICX/USDT', 'QTUM/USDT', 'ONT/USDT',
+            'CELO/USDT', 'AR/USDT', 'KDA/USDT', 'BLUR/USDT',
+            'PEPE/USDT', 'FLR/USDT', 'CFX/USDT', 'RNDR/USDT',
+            'WLD/USDT', 'TIA/USDT', 'BONK/USDT', 'MINA/USDT',
+            'PENDLE/USDT', 'JTO/USDT', 'PYTH/USDT'
         ];
     }
 

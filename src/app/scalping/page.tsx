@@ -165,6 +165,7 @@ export default function ScalpingPage() {
     return (
         <div className="min-h-screen bg-background">
             <Navbar />
+            <MessageBox messages={[]} onDismiss={() => { }} />
 
             <div className="container mx-auto px-4 py-8">
                 {/* Scalping Mode Badge */}

@@ -66,7 +66,14 @@ export class SignalGenerator {
     ): Promise<Signal | null> {
         const { prices, volumes, pair, marketType, currentPrice } = marketData;
 
-        // FILTER: Reject extremely low-priced coins (< $0.0001)
+        // COMPREHENSIVE PRICE VALIDATION
+        // Filter out invalid prices that would show as 0.0000 or cause errors
+        if (!currentPrice || isNaN(currentPrice) || !isFinite(currentPrice) || currentPrice <= 0) {
+            console.log(`⚠️ Skipping ${pair} - invalid price (${currentPrice})`);
+            return null;
+        }
+
+        // Reject extremely low-priced coins (< $0.0001)
         // These display as 0.0000 and create confusing signals
         if (currentPrice < 0.0001) {
             console.log(`⚠️ Skipping ${pair} - price too low (${currentPrice})`);
@@ -437,6 +444,15 @@ export class SignalGenerator {
 
         }
 
+        // Final validation: Ensure all prices are valid before creating signal
+        const pricesToValidate = [entryPrice, stopLoss, takeProfit, takeProfit1, takeProfit2, takeProfit3];
+        const hasInvalidPrice = pricesToValidate.some(p => !p || isNaN(p) || !isFinite(p) || p <= 0);
+
+        if (hasInvalidPrice) {
+            console.error(`⚠️ Skipping ${pair} - invalid TP/SL prices detected`);
+            return null;
+        }
+
         // Generate signal ID
         const id = `${pair.replace('/', '')}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
@@ -737,8 +753,8 @@ export class SignalGenerator {
             tp3Hit,
             profitLoss,
             profitLossPercentage,
-            status,
-            currentRsi: signal.rsi
+            status
+            // currentRsi is preserved from signal (updated externally by price monitoring)
         };
     }
 

@@ -42,11 +42,16 @@ export class AutoGenerator {
 
         console.log(`🤖 Starting auto-generation for ${type} (every ${this.INTERVALS[type] / 60000} mins)`);
 
+        // IMPORTANT: Set timestamp BEFORE generating to avoid timer showing 0
+        // This ensures the countdown timer always has a valid timestamp
+        SignalManager.updateLastGenerated(type);
+
         // Generate immediately
         this.generateSignals(type, config);
 
         // Then schedule periodic generation
         this.intervals[type] = setInterval(() => {
+            SignalManager.updateLastGenerated(type);
             this.generateSignals(type, config);
         }, this.INTERVALS[type]);
 
@@ -110,7 +115,6 @@ export class AutoGenerator {
             if (generatedSignals.length > 0) {
                 // Replace old signals with new ones
                 SignalManager.setActiveSignals(generatedSignals, type);
-                SignalManager.updateLastGenerated(type);
 
                 console.log(`✅ Auto-generated ${generatedSignals.length} ${type} signals`);
 
