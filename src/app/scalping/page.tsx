@@ -78,12 +78,20 @@ export default function ScalpingPage() {
 
     // Update next generation countdown
     useEffect(() => {
-        if (!autoGenEnabled) return;
+        if (!autoGenEnabled) {
+            setNextGenTime(0);
+            return;
+        }
 
-        const interval = setInterval(() => {
+        // Update immediately when enabled
+        const updateTime = () => {
             const timeLeft = AutoGenerator.timeUntilNext('scalping');
             setNextGenTime(timeLeft);
-        }, 1000);
+        };
+
+        updateTime(); // Initial update
+
+        const interval = setInterval(updateTime, 1000);
 
         return () => clearInterval(interval);
     }, [autoGenEnabled]);
@@ -101,9 +109,12 @@ export default function ScalpingPage() {
             generateScalpingSignals();
         }
 
-        // Auto-enable auto-generation if not already enabled
-        if (!autoGenEnabled) {
-            console.log('🤖 Auto-enabling auto-generation for scalping...');
+        // CRITICAL FIX: Always restart auto-generation when market/type selected
+        // This ensures the interval is running even after page reload
+        // The AutoGenerator is a static class that loses its intervals on reload
+        const prefs = SignalManager.getAutoGenPreferences();
+        if (prefs.scalping.enabled || !autoGenEnabled) {
+            console.log('🤖 (Re)starting auto-generation for scalping...');
             AutoGenerator.startAutoGeneration('scalping', {
                 market: selectedMarket,
                 signalType: selectedType,

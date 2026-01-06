@@ -76,8 +76,8 @@ export class OnChainSignalGenerator {
         console.log(`📈 Technical: RSI=${technicalScore.rsi}, MACD=${technicalScore.macd.toFixed(2)}`);
 
         // Minimum score threshold (lowered for more signals)
-        if (Math.abs(combinedScore.total) < 20) {
-            console.log(`⚠️ BTC signal too weak (${combinedScore.total.toFixed(1)}), need ≥20`);
+        if (Math.abs(combinedScore.total) < 10) {
+            console.log(`⚠️ BTC signal too weak (${combinedScore.total.toFixed(1)}), need ≥10`);
             return null;
         }
 

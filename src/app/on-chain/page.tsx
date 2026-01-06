@@ -64,12 +64,20 @@ export default function OnChainPage() {
 
     // Update next generation countdown
     useEffect(() => {
-        if (!autoGenEnabled) return;
+        if (!autoGenEnabled) {
+            setNextGenTime(0);
+            return;
+        }
 
-        const interval = setInterval(() => {
+        // Update immediately when enabled
+        const updateTime = () => {
             const timeLeft = AutoGenerator.timeUntilNext('onchain');
             setNextGenTime(timeLeft);
-        }, 1000);
+        };
+
+        updateTime(); // Initial update
+
+        const interval = setInterval(updateTime, 1000);
 
         return () => clearInterval(interval);
     }, [autoGenEnabled]);
@@ -85,9 +93,11 @@ export default function OnChainPage() {
             generateSignals();
         }
 
-        // Auto-enable auto-generation if not already enabled
-        if (!autoGenEnabled) {
-            console.log('🤖 Auto-enabling auto-generation for on-chain...');
+        // CRITICAL FIX: Always restart auto-generation on mount
+        // This ensures the interval is running even after page reload
+        const prefs = SignalManager.getAutoGenPreferences();
+        if (prefs.onchain.enabled || !autoGenEnabled) {
+            console.log('🤖 (Re)starting auto-generation for on-chain...');
             AutoGenerator.startAutoGeneration('onchain', {
                 market: 'CRYPTO',
                 signalType: 'FUTURE',
