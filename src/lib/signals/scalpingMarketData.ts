@@ -1,5 +1,6 @@
 import { MarketType } from './types';
 import { BinanceAPI } from './binanceAPI';
+import { ExnessAPI } from './exnessAPI';
 
 /**
  * Scalping Market Data Generator
@@ -8,7 +9,7 @@ import { BinanceAPI } from './binanceAPI';
 export class ScalpingMarketData {
     /**
      * Generate 5-minute candle market data for scalping
-     * Fetches real Binance prices for crypto pairs, falls back to simulated data
+     * Fetches real Binance prices for crypto pairs and Exness-compatible data for Forex
      * @param pair Trading pair (e.g., 'BTC/USDT')
      * @param marketType CRYPTO or FOREX
      * @param candleCount Number of 5-min candles (default 48 = 4 hours)
@@ -38,7 +39,32 @@ export class ScalpingMarketData {
             }
         }
 
-        // Simulated data generation (fallback for FOREX or when Binance API fails)
+        // Try to fetch Exness-compatible data for Forex pairs
+        if (marketType === MarketType.FOREX) {
+            try {
+                // Get 5-minute candles from Exness API
+                const candles = await ExnessAPI.getForexKlines(pair, '5m', candleCount);
+                
+                if (candles.length > 0) {
+                    return {
+                        pair,
+                        marketType,
+                        prices: candles.map(c => c.close),
+                        volumes: candles.map(c => c.volume),
+                        highs: candles.map(c => c.high),
+                        lows: candles.map(c => c.low),
+                        timeframe: '5m' as const,
+                        currentPrice: candles[candles.length - 1].close
+                    };
+                }
+            } catch (error) {
+                if (process.env.NODE_ENV === 'development') {
+                    console.info(`📊 Exness API unavailable for ${pair} (scalping) - using fallback simulation`);
+                }
+            }
+        }
+
+        // Simulated data generation (fallback when APIs fail)
         // Get base price for the pair
         const basePrice = this.getBasePrice(pair, marketType);
 

@@ -100,12 +100,13 @@ export default function ScalpingPage() {
     useEffect(() => {
         if (!selectedMarket || !selectedType) return;
 
-        // Check if we already have signals
+        // Check if we already have signals FOR THIS MARKET
         const existingSignals = SignalManager.getActiveSignals('scalping');
+        const hasRelevantSignals = existingSignals.some(s => s.marketType === selectedMarket);
 
-        // If no signals, generate them automatically
-        if (existingSignals.length === 0) {
-            console.log('🤖 Auto-starting scalping signal generation...');
+        // If no relevant signals, generate them automatically
+        if (!hasRelevantSignals) {
+            console.log(`🤖 Auto-starting scalping signal generation for ${selectedMarket}...`);
             generateScalpingSignals();
         }
 
@@ -163,7 +164,8 @@ export default function ScalpingPage() {
 
     // Calculate stats
     const filteredSignals = signals.filter(signal =>
-        selectedDirections.includes(signal.direction)
+        selectedDirections.includes(signal.direction) &&
+        signal.marketType === selectedMarket
     );
 
     const stats = {
@@ -217,7 +219,9 @@ export default function ScalpingPage() {
                             <button
                                 onClick={() => {
                                     setSelectedMarket('FOREX');
-                                    showInfo('FOREX Selected', 'Choose trading type');
+                                    setSelectedType('FUTURE'); // Use FUTURE to enable Long/Short signals for Forex
+                                    setTimeout(generateScalpingSignals, 100);
+                                    showInfo('FOREX Selected', 'Generating signals...');
                                 }}
                                 className="p-8 rounded-xl bg-card border border-border hover:border-green-500 transition-all"
                             >

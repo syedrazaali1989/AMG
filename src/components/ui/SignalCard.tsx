@@ -154,7 +154,9 @@ export function SignalCard({ signal, onClick }: SignalCardProps) {
                         <div className="flex items-center gap-2">
                             <div className="flex items-center gap-1.5 min-w-[80px]">
                                 <span className="w-1.5 h-1.5 rounded-full bg-[#F3BA2F]"></span>
-                                <span className="text-xs font-medium text-muted-foreground">Binance</span>
+                                <span className="text-xs font-medium text-muted-foreground">
+                                    {signal.marketType === 'FOREX' ? 'Exness' : 'Binance'}
+                                </span>
                             </div>
                             <span className="text-sm font-bold font-mono tracking-tight">
                                 {formatPrice(signal.currentPrice, 5)}

@@ -1,6 +1,7 @@
 import { Signal, SignalDirection } from '../signals/types';
 import { SignalManager } from './signalManager';
 import { fetchBinancePrice } from '../utils/binancePrices';
+import { ExnessAPI } from '../signals/exnessAPI';
 
 /**
  * Signal Catch-Up Service
@@ -51,6 +52,16 @@ export class SignalCatchup {
                     if (realPrice) {
                         currentPrice = realPrice;
                         console.log(`📊 ${signal.pair}: Current price = ${currentPrice.toFixed(8)}`);
+                    }
+                } catch (error) {
+                    console.warn(`⚠️ Could not fetch ${signal.pair} price, using last known`);
+                }
+            } else if (signal.marketType === 'FOREX') {
+                try {
+                    const realPrice = await ExnessAPI.getCurrentForexPrice(signal.pair);
+                    if (realPrice) {
+                        currentPrice = realPrice;
+                        console.log(`💱 ${signal.pair}: Current price = ${currentPrice.toFixed(5)}`);
                     }
                 } catch (error) {
                     console.warn(`⚠️ Could not fetch ${signal.pair} price, using last known`);

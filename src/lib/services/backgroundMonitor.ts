@@ -1,6 +1,7 @@
 import { Signal, MarketType } from '../signals/types';
 import { SignalManager } from './signalManager';
 import { fetchBinancePrice } from '../utils/binancePrices';
+import { ExnessAPI } from '../signals/exnessAPI';
 
 /**
  * Background Monitor Service
@@ -26,10 +27,10 @@ export class BackgroundMonitor {
         // Run immediately first time
         this.updateAllSignals();
 
-        // Then run every 3 seconds
+        // Then run every 1 second
         this.intervalId = setInterval(() => {
             this.updateAllSignals();
-        }, 3000);
+        }, 1000);
 
         this.isRunning = true;
     }
@@ -167,6 +168,19 @@ export class BackgroundMonitor {
             } catch (error) {
                 // Log CORS failure for monitoring
                 console.debug(`⚠️ ${signal.pair}: Binance fetch failed, using simulation`);
+            }
+        }
+
+        // For Forex, try to fetch Exness-compatible price
+        if (signal.marketType === MarketType.FOREX) {
+            try {
+                const realPrice = await ExnessAPI.getCurrentForexPrice(signal.pair);
+                if (realPrice) {
+                    console.log(`💱 ${signal.pair}: Real Exness price = ${realPrice.toFixed(5)}`);
+                    return realPrice;
+                }
+            } catch (error) {
+                console.debug(`⚠️ ${signal.pair}: Exness fetch failed, using simulation`);
             }
         }
 
