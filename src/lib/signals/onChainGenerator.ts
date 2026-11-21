@@ -4,56 +4,136 @@ import { ExchangeAvailability } from './exchangeAvailability';
 import { MarketDataManager } from './marketData';
 import { CorrelatedSignalGenerator } from './correlatedSignalGenerator';
 
+/** Minimum combined-score magnitude required to issue the BTC signal. */
+export const ONCHAIN_SCORE_THRESHOLD = 10;
+
+/** Minimum transaction value (USD) counted as a "large" BTC transfer. */
+export const ONCHAIN_MIN_TX_USD = 500000;
+
+/**
+ * Auditable evidence for one on-chain generation pass: the real inputs
+ * (large transactions, exchange flow) and the scores they produced, so a
+ * "no signal" outcome can be verified instead of taken on trust.
+ */
+export interface OnChainDiagnostics {
+    minTxUSD: number;
+    transactionsAnalyzed: number;
+    exchangeInflowCount: number;
+    exchangeOutflowCount: number;
+    unknownCount: number;
+    exchangeInflowUSD: number;
+    exchangeOutflowUSD: number;
+    netFlowUSD: number;
+    flowSentiment: string;
+    onChainScore: number;
+    technicalScore: number | null;
+    rsi: number | null;
+    combinedScore: number | null;
+    threshold: number;
+    btcSignalIssued: boolean;
+    correlatedIssued: number;
+}
+
+export interface OnChainReport {
+    signals: Signal[];
+    transactions: LargeTransaction[];
+    diagnostics: OnChainDiagnostics;
+}
+
 /**
  * On-Chain Signal Generator
- * Combines whale movements with technical analysis
+ * Combines real large BTC transfers with technical analysis
  * CRYPTO FUTURES only
+ *
+ * Data honesty: every input is live - large transactions come from the
+ * Blockchain.info mempool feed and prices from Binance. If a source is
+ * unreachable the report method THROWS; nothing is ever generated from
+ * simulated transactions or prices.
  */
 export class OnChainSignalGenerator {
     /**
-     * Generate on-chain signals combining whale data + technical analysis
+     * Full generation pass returning the signals AND the real transaction
+     * feed plus scoring diagnostics. Used by the server route
+     * (/api/on-chain/signals) so every visitor sees the same result.
+     *
+     * Throws when a live data source is unavailable.
+     */
+    static async generateOnChainReport(): Promise<OnChainReport> {
+        // Get REAL Bitcoin transactions from Blockchain.info (min $500K).
+        // Throws if the source is down - the caller surfaces that honestly.
+        const transactions = await BlockchainInfoAPI.getLargeTransactions(ONCHAIN_MIN_TX_USD);
+
+        const flow = BlockchainInfoAPI.calculateExchangeFlow(transactions);
+        const onChainScore = this.calculateBitcoinOnChainScore(transactions);
+
+        const diagnostics: OnChainDiagnostics = {
+            minTxUSD: ONCHAIN_MIN_TX_USD,
+            transactionsAnalyzed: transactions.length,
+            exchangeInflowCount: onChainScore.inflow,
+            exchangeOutflowCount: onChainScore.outflow,
+            unknownCount: transactions.length - onChainScore.inflow - onChainScore.outflow,
+            exchangeInflowUSD: flow.inflow,
+            exchangeOutflowUSD: flow.outflow,
+            netFlowUSD: flow.net,
+            flowSentiment: flow.sentiment,
+            onChainScore: onChainScore.score,
+            technicalScore: null,
+            rsi: null,
+            combinedScore: null,
+            threshold: ONCHAIN_SCORE_THRESHOLD,
+            btcSignalIssued: false,
+            correlatedIssued: 0
+        };
+
+        if (transactions.length === 0) {
+            console.log('🔗 No large Bitcoin transactions in the live feed right now');
+            return { signals: [], transactions, diagnostics };
+        }
+
+        console.log(`🔗 Processing ${transactions.length} real Bitcoin transactions...`);
+
+        // Generate PRIMARY signal for Bitcoin (whale-backed)
+        const btcSignal = await this.generateSignalForBitcoin(transactions, diagnostics);
+
+        if (!btcSignal) {
+            return { signals: [], transactions, diagnostics };
+        }
+
+        diagnostics.btcSignalIssued = true;
+
+        // Generate CORRELATED signals for altcoins (derived from the BTC
+        // signal via historical correlation - labelled as correlated)
+        console.log(`🔄 Generating correlated altcoin signals...`);
+        const correlatedSignals = await CorrelatedSignalGenerator.generateCorrelatedSignals(btcSignal, true);
+        diagnostics.correlatedIssued = correlatedSignals.length;
+
+        // Combine: BTC + Altcoins
+        const allSignals = [btcSignal, ...correlatedSignals];
+        console.log(`✅ Total: ${allSignals.length} signals (1 BTC + ${correlatedSignals.length} correlated)`);
+
+        return { signals: allSignals, transactions, diagnostics };
+    }
+
+    /**
+     * Generate on-chain signals combining whale data + technical analysis.
+     * Signals only - kept for existing callers. Throws on live-data
+     * failure (no simulated fallback exists anymore).
      */
     static async generateOnChainSignals(): Promise<Signal[]> {
-        try {
-            // Get REAL Bitcoin transactions from Blockchain.info (min $500K)
-            const bitcoinTransactions = await BlockchainInfoAPI.getLargeTransactions(500000);
-
-            if (!bitcoinTransactions || bitcoinTransactions.length === 0) {
-                console.warn('No large Bitcoin transactions found');
-                return [];
-            }
-
-            console.log(`🔗 Processing ${bitcoinTransactions.length} real Bitcoin transactions...`);
-
-            // Generate PRIMARY signal for Bitcoin (whale-backed)
-            const btcSignal = await this.generateSignalForBitcoin(bitcoinTransactions);
-
-            if (!btcSignal) return [];
-
-            // Generate CORRELATED signals for altcoins
-            console.log(`🔄 Generating correlated altcoin signals...`);
-            const correlatedSignals = await CorrelatedSignalGenerator.generateCorrelatedSignals(btcSignal, true);
-
-            // Combine: BTC + Altcoins
-            const allSignals = [btcSignal, ...correlatedSignals];
-            console.log(`✅ Total: ${allSignals.length} signals (1 BTC + ${correlatedSignals.length} correlated)`);
-
-            return allSignals;
-        } catch (error) {
-            console.error('On-chain signal generation error:', error);
-            return [];
-        }
+        const report = await this.generateOnChainReport();
+        return report.signals;
     }
 
     /**
      * Generate signal for Bitcoin using real blockchain data
      */
     private static async generateSignalForBitcoin(
-        transactions: LargeTransaction[]
+        transactions: LargeTransaction[],
+        diagnostics: OnChainDiagnostics
     ): Promise<Signal | null> {
         const pair = 'BTC/USDT';
 
-        // Get REAL market data from Binance API
+        // Get REAL market data from Binance API (throws if unavailable)
         const marketData = await MarketDataManager.generateMarketData(pair, MarketType.CRYPTO, 100);
         const currentPrice = marketData.prices[marketData.prices.length - 1];
 
@@ -70,14 +150,18 @@ export class OnChainSignalGenerator {
             total: (onChainScore.score * 0.5) + (technicalScore.score * 0.5)
         };
 
+        diagnostics.technicalScore = technicalScore.score;
+        diagnostics.rsi = technicalScore.rsi;
+        diagnostics.combinedScore = combinedScore.total;
+
         // Debug logging
         console.log(`📊 BTC Scoring: OnChain=${onChainScore.score}, Technical=${technicalScore.score}, Total=${combinedScore.total}`);
         console.log(`🐋 Flow: ${onChainScore.sentiment} (In:${onChainScore.inflow}, Out:${onChainScore.outflow})`);
         console.log(`📈 Technical: RSI=${technicalScore.rsi}, MACD=${technicalScore.macd.toFixed(2)}`);
 
-        // Minimum score threshold (lowered for more signals)
-        if (Math.abs(combinedScore.total) < 10) {
-            console.log(`⚠️ BTC signal too weak (${combinedScore.total.toFixed(1)}), need ≥10`);
+        // Minimum score threshold
+        if (Math.abs(combinedScore.total) < ONCHAIN_SCORE_THRESHOLD) {
+            console.log(`⚠️ BTC signal too weak (${combinedScore.total.toFixed(1)}), need ≥${ONCHAIN_SCORE_THRESHOLD}`);
             return null;
         }
 
@@ -93,6 +177,13 @@ export class OnChainSignalGenerator {
 
         // Get exchange flow summary
         const flow = BlockchainInfoAPI.calculateExchangeFlow(transactions);
+
+        // FUTURE signals expire after 48h (repo-wide convention); the
+        // outcome updater marks an unfilled signal EXPIRED at that point,
+        // never a win. TP1/TP2 are milestones - only the final TP (tp3)
+        // completes the trade.
+        const expiresAt = new Date();
+        expiresAt.setHours(expiresAt.getHours() + 48);
 
         // Create signal
         const signal: Signal = {
@@ -113,6 +204,7 @@ export class OnChainSignalGenerator {
             signalType: SignalType.FUTURE,
             status: SignalStatus.ACTIVE,
             timestamp: new Date(),
+            expiresAt,
             timeframe: Timeframe.ONE_HOUR,
             tp1Hit: false,
             tp2Hit: false,
@@ -175,7 +267,7 @@ export class OnChainSignalGenerator {
     ): string[] {
         const rationale: string[] = [];
 
-        rationale.push(`🔗 ${txCount} real Bitcoin transactions analyzed (>$1M each)`);
+        rationale.push(`🔗 ${txCount} real Bitcoin transactions analyzed (≥$500K each, live Blockchain.info feed)`);
 
         // On-chain rationale
         if (direction === SignalDirection.LONG) {

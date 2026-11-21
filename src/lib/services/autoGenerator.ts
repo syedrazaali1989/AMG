@@ -1,7 +1,6 @@
 import { Signal, SignalType, MarketType } from '../signals/types';
 import { SignalManager } from './signalManager';
 import { ScalpingSignalGenerator } from '../signals/scalpingGenerator';
-import { OnChainSignalGenerator } from '../signals/onChainGenerator';
 import { MarketDataManager } from '../signals/marketData';
 
 /**
@@ -169,10 +168,23 @@ export class AutoGenerator {
     }
 
     /**
-     * Generate on-chain signals
+     * Generate on-chain signals.
+     *
+     * On-chain signals are generated SERVER-SIDE by /api/on-chain/signals
+     * (one shared pass over the live Blockchain.info large-transaction
+     * feed and live Binance prices) so every visitor sees the same
+     * signals. This method only fetches them. If a live source is
+     * unavailable the API returns an error and no signals are produced -
+     * there is no client-side or simulated fallback.
      */
     private static async generateOnChainSignals(): Promise<Signal[]> {
-        return await OnChainSignalGenerator.generateOnChainSignals();
+        const response = await fetch('/api/on-chain/signals');
+        if (!response.ok) {
+            throw new Error(`Live on-chain signals unavailable (status ${response.status})`);
+        }
+
+        const data = await response.json();
+        return (data.signals || []) as Signal[];
     }
 
     /**
