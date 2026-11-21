@@ -27,6 +27,20 @@ export interface BinanceTicker24h {
     count: number;
 }
 
+/**
+ * Parsed OHLCV candle (timestamps in ms, oldest first).
+ * quoteVolume is the quote-asset (USDT) volume of the candle.
+ */
+export interface Candle {
+    timestamp: number;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    volume: number;
+    quoteVolume: number;
+}
+
 export class BinanceAPI {
     // Spot REST base. Deliberately data-api.binance.vision, NOT
     // api.binance.com: api.binance.com geo-blocks (HTTP 451) requests from
@@ -131,6 +145,57 @@ export class BinanceAPI {
             }
             throw error;
         }
+    }
+
+    /**
+     * Get parsed OHLCV candles for a pair (oldest first).
+     * Throws when live data is unavailable - there is no fallback.
+     */
+    static async getCandles(
+        pair: string,
+        interval: string,
+        limit: number = 100
+    ): Promise<Candle[]> {
+        const symbol = this.pairToBinanceSymbol(pair);
+        const klines = await this.getKlines(symbol, interval, limit);
+        return klines.map(kline => ({
+            timestamp: Number(kline[0]),
+            open: parseFloat(String(kline[1])),
+            high: parseFloat(String(kline[2])),
+            low: parseFloat(String(kline[3])),
+            close: parseFloat(String(kline[4])),
+            volume: parseFloat(String(kline[5])),
+            quoteVolume: parseFloat(String(kline[7]))
+        }));
+    }
+
+    /**
+     * Get 24h tickers for ALL symbols in one call (used by the
+     * money-rotation computation, which needs the whole universe).
+     */
+    static async getAll24hTickers(): Promise<BinanceTicker24h[]> {
+        const response = await fetch(`${this.BASE_URL}/ticker/24hr`);
+        if (!response.ok) {
+            throw new Error(`Binance API error: ${response.status}`);
+        }
+        return await response.json();
+    }
+
+    /**
+     * Freshness gate: a candle series counts as LIVE only when its last
+     * candle opened within two candle intervals of now. Binance's last
+     * returned candle is the in-progress one, so a live series always
+     * passes; a frozen series (e.g. a delisted pair whose last candle is
+     * months old) is rejected and must never be analysed as live data.
+     */
+    static isCandleSeriesFresh(
+        candles: { timestamp: number }[],
+        intervalMs: number,
+        now: number = Date.now()
+    ): boolean {
+        if (candles.length === 0) return false;
+        const lastOpen = candles[candles.length - 1].timestamp;
+        return now - lastOpen <= 2 * intervalMs;
     }
 
     /**

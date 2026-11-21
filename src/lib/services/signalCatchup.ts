@@ -1,5 +1,5 @@
 import { Signal, SignalStatus } from '../signals/types';
-import { SignalManager } from './signalManager';
+import { SignalManager, SignalStoreType } from './signalManager';
 import { SignalGenerator } from '../signals/generator';
 import { fetchBinancePrice } from '../utils/binancePrices';
 import { ExnessAPI } from '../signals/exnessAPI';
@@ -20,7 +20,7 @@ export class SignalCatchup {
     static async catchupAllSignals(): Promise<void> {
         console.log('🔄 Catching up on signals...');
 
-        const types: ('standard' | 'scalping' | 'onchain')[] = ['standard', 'scalping', 'onchain'];
+        const types: SignalStoreType[] = ['standard', 'scalping', 'onchain', 'scalpingv2'];
 
         for (const type of types) {
             await this.catchupSignalsOfType(type);
@@ -32,7 +32,7 @@ export class SignalCatchup {
     /**
      * Catch up signals of a specific type
      */
-    private static async catchupSignalsOfType(type: 'standard' | 'scalping' | 'onchain'): Promise<void> {
+    private static async catchupSignalsOfType(type: SignalStoreType): Promise<void> {
         const signals = SignalManager.getActiveSignals(type);
         if (signals.length === 0) return;
 
@@ -46,7 +46,7 @@ export class SignalCatchup {
     /**
      * Check a single signal against current price
      */
-    private static async checkSignal(signal: Signal, type: 'standard' | 'scalping' | 'onchain'): Promise<void> {
+    private static async checkSignal(signal: Signal, type: SignalStoreType): Promise<void> {
         try {
             // Fetch current price
             let currentPrice = signal.currentPrice;
