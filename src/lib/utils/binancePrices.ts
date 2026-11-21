@@ -5,7 +5,7 @@ export async function fetchBinancePrice(pair: string): Promise<number | null> {
     try {
         const symbol = pair.replace('/', ''); // BTC/USDT → BTCUSDT
         const response = await fetch(
-            `https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`,
+            `https://data-api.binance.vision/api/v3/ticker/price?symbol=${symbol}`,
             { cache: 'no-store' }
         );
 

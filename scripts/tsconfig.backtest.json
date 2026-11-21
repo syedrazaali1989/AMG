@@ -1,0 +1,1 @@
+{"compilerOptions":{"esModuleInterop":true,"forceConsistentCasingInFileNames":true,"module":"commonjs","moduleResolution":"node","outDir":"/tmp/amg-bt-build","rootDir":"..","skipLibCheck":true,"strict":true,"target":"ES2020","types":["node"]},"include":["backtest.ts","../src/lib/signals/engineCore.ts"]}

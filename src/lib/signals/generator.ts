@@ -12,8 +12,8 @@ import {
     TechnicalAlignment
 } from './types';
 import { TechnicalIndicators } from './indicators';
+import { evaluateSignalCore, DEFAULT_RULES, EngineRuleSwitches } from './engineCore';
 import { NewsAnalyzer } from './newsAnalyzer';
-import { AdvancedMarketAnalyzer, MarketAnalysis } from './advancedAnalyzer';
 import { SignalHelpers } from './signalHelpers';
 import { PredictionEngine } from '../ml/predictionEngine';
 import { MultiTimeframeAnalyzer } from '../timeframe/multiTimeframeAnalyzer';
@@ -70,7 +70,8 @@ export class SignalGenerator {
     static async generateSignal(
         marketData: MarketData,
         signalType: SignalType,
-        timeframe: Timeframe = Timeframe.ONE_HOUR
+        timeframe: Timeframe = Timeframe.ONE_HOUR,
+        rules: EngineRuleSwitches = DEFAULT_RULES
     ): Promise<Signal | null> {
         const { prices, volumes, pair, marketType, currentPrice } = marketData;
 
@@ -88,154 +89,40 @@ export class SignalGenerator {
             return null;
         }
 
-        // Calculate all technical indicators
-        const rsi = TechnicalIndicators.calculateRSI(prices);
-        const macd = TechnicalIndicators.calculateMACD(prices);
-        const bollingerBands = TechnicalIndicators.calculateBollingerBands(prices);
-        const ema9 = TechnicalIndicators.calculateEMA(prices, 9);
-        const ema21 = TechnicalIndicators.calculateEMA(prices, 21);
-        const ema50 = TechnicalIndicators.calculateEMA(prices, 50);
-        const trend = TechnicalIndicators.determineTrend(prices);
-        const volumeAvg = TechnicalIndicators.calculateVolumeAverage(volumes);
-        const currentVolume = volumes[volumes.length - 1];
+        // ============================================================
+        // DECISION CORE (shared engine, src/lib/signals/engineCore.ts)
+        // Scoring, direction gates, quality filters and entry/SL/TP
+        // levels are computed by the pure synchronous core - the same
+        // code the backtest harness exercises. Everything after this
+        // point in generateSignal is display-only enrichment (news, ML
+        // predictions, rationale) and cannot change the decision.
+        // ============================================================
+        const core = evaluateSignalCore(marketData, signalType, rules);
+        if (!core) return null;
 
-        // HYBRID STRATEGY: Calculate Momentum & ROC
-        const momentum = this.calculateMomentum(prices, 10);
-        const roc = this.calculateROC(prices, 10);
+        const {
+            direction,
+            confidence,
+            rsi,
+            macd,
+            volumeAvg,
+            currentVolume,
+            entryPrice,
+            stopLoss,
+            takeProfit,
+            takeProfit1,
+            takeProfit2,
+            takeProfit3,
+            advancedAnalysis,
+            isCounterTrend
+        } = core;
 
-        // Signal scoring system (HYBRID APPROACH)
-        let buyScore = 0;
-        let sellScore = 0;
-
-        // === MEAN REVERSION SIGNALS (Reversal Trading) ===
-
-        // RSI Analysis with Momentum Confirmation
-        if (rsi < 30 && momentum > -1.5) {
-            // Oversold + momentum slowing = SAFE reversal entry
-            buyScore += 25;
-        } else if (rsi < 40 && momentum > 0) {
-            // Slightly oversold + momentum turning positive
-            buyScore += 15;
-        } else if (rsi > 70) {
-            // Overbought = potential reversal SHORT
-            sellScore += 25;
-        } else if (rsi > 60 && momentum < 0) {
-            // Slightly overbought + momentum turning negative
-            sellScore += 15;
-        }
-
-        // === MOMENTUM TRADING SIGNALS (Trend Following) ===
-
-        // Strong Downtrend Detection
-        if (momentum < -2 && roc < -3) {
-            // Strong bearish momentum = Follow with SHORT
-            sellScore += 25;
-        } else if (momentum < -1 && roc < -2) {
-            // Moderate bearish momentum
-            sellScore += 15;
-        }
-
-        // Strong Uptrend Detection
-        if (momentum > 2 && roc > 3) {
-            // Strong bullish momentum = Follow with LONG
-            buyScore += 25;
-        } else if (momentum > 1 && roc > 2) {
-            // Moderate bullish momentum
-            buyScore += 15;
-        }
-
-        // MACD Analysis (works for both strategies)
-        if (macd.histogram > 0 && macd.macd > macd.signal) buyScore += 20;
-        else if (macd.histogram < 0 && macd.macd < macd.signal) sellScore += 20;
-
-        // Bollinger Bands Analysis
-        if (currentPrice <= bollingerBands.lower && momentum > -1) {
-            // At lower band + momentum not accelerating down = SAFE reversal
-            buyScore += 20;
-        } else if (currentPrice >= bollingerBands.upper) {
-            // At upper band = potential SHORT
-            sellScore += 20;
-        }
-
-        // EMA Trend Analysis
-        if (trend === 'BULLISH') buyScore += 15;
-        else if (trend === 'BEARISH') sellScore += 15;
-
-        // Volume Confirmation
-        if (currentVolume > volumeAvg * 1.5) {
-            if (buyScore > sellScore) buyScore += 10;
-            else if (sellScore > buyScore) sellScore += 10;
-        }
-
-        // Price action relative to EMAs
-        if (currentPrice > ema9 && currentPrice > ema21) buyScore += 10;
-        else if (currentPrice < ema9 && currentPrice < ema21) sellScore += 10;
-
-        // === SAFETY CHECK: Prevent Falling Knife & Rising Rocket ===
-        // If strong downward momentum, DON'T give reversal LONG signals
-        if (momentum < -2.5 && roc < -4) {
-            // Falling knife detected - remove reversal buy signals
-            if (rsi < 40) {
-                buyScore = Math.max(0, buyScore - 30); // Reduce buy score significantly
-            }
-        }
-
-        // If strong upward momentum, DON'T give reversal SHORT signals (SYMMETRIC CHECK)
-        if (momentum > 2.5 && roc > 4) {
-            // Rising rocket detected - remove reversal sell signals
-            if (rsi > 60) {
-                sellScore = Math.max(0, sellScore - 30); // Reduce sell score significantly
-            }
-        }
-
-        // Determine if signal is strong enough
-        // Balanced thresholds for quality signals (10-15 per generation)
-        // Moderate increase for better accuracy without over-filtering
-        const BUY_THRESHOLD = 58;   // Balanced: not too strict, not too loose
-        const SELL_THRESHOLD = 58;  // Equal treatment for both directions
-        let direction: SignalDirection | null = null;
-        let technicalConfidence = 0;
-
-        // PULLBACK CONFIRMATION: Check if price has pulled back from recent high
-        // This prevents buying at local tops
-        const recentHighs = prices.slice(-10); // Last 10 candles
-        const recentHigh = Math.max(...recentHighs);
-        const pullbackPercent = ((recentHigh - currentPrice) / recentHigh) * 100;
-
-        // For LONG/BUY: require 0.5-1.5% pullback from recent high
-        const hasPullback = pullbackPercent >= 0.5 && pullbackPercent <= 1.5;
-
-        if (buyScore >= BUY_THRESHOLD && buyScore > sellScore) {
-            // LONG/BUY signals require pullback confirmation
-            if (hasPullback) {
-                direction = signalType === SignalType.FUTURE ? SignalDirection.LONG : SignalDirection.BUY;
-                technicalConfidence = Math.min(buyScore, 100);
-            } else {
-                // Skip signal - price at or near local top
-                return null;
-            }
-        } else if (sellScore >= SELL_THRESHOLD && sellScore > buyScore) {
-            // SPOT: Skip SELL signals (only BUY makes sense in spot trading)
-            if (signalType === SignalType.SPOT) {
-                return null; // No SELL signals for SPOT
-            }
-            direction = signalType === SignalType.FUTURE ? SignalDirection.SHORT : SignalDirection.SELL;
-            technicalConfidence = Math.min(sellScore, 100);
-        }
-
-        // No signal if not strong enough
-        if (!direction) return null;
-
-        // Generate advanced market analysis
-        const advancedAnalysis = AdvancedMarketAnalyzer.generateAnalysis(
-            pair,
-            currentPrice,
-            prices,
-            volumes
+        // Raw technical score (capped at 100) for the prediction engine
+        // input, exactly as computed before the core extraction.
+        const technicalConfidence = Math.min(
+            (direction === SignalDirection.BUY || direction === SignalDirection.LONG) ? core.buyScore : core.sellScore,
+            100
         );
-
-        // Check if this is a counter-trend signal
-        const isCounterTrend = this.isCounterTrendSignal(direction, advancedAnalysis.trend);
 
         // === NEWS (DISPLAY ONLY) ===
         // News impact and sentiment are still collected for display on the
@@ -245,26 +132,8 @@ export class SignalGenerator {
         const newsImpact = await NewsAnalyzer.getNewsImpactAssessment(pair);
         const newsImpactScore = newsImpact.score; // -5 to +5
 
-        const technicalScore = (direction === SignalDirection.BUY || direction === SignalDirection.LONG) ? buyScore : sellScore;
+        const technicalScore = (direction === SignalDirection.BUY || direction === SignalDirection.LONG) ? core.buyScore : core.sellScore;
         const sentimentScore = await NewsAnalyzer.calculateSentimentScore(pair, technicalScore);
-
-        // Confidence IS the technical confidence (raw score capped at 100).
-        // Issuance below is therefore decided by technicals alone.
-        const confidence = Math.round(Math.max(0, Math.min(100, technicalConfidence)));
-
-        // Counter-trend signals require a stronger technical score.
-        // (Was 80 on the old sentiment-blended scale; on the pure technical
-        // scale the observed maximum is ~80, so 70 keeps a real premium over
-        // the 58 base gate without being a de-facto ban.)
-        if (isCounterTrend && confidence < 70) {
-            return null; // Reject weak counter-trend signals (higher risk)
-        }
-
-        // Profile-based confidence threshold (technical score only)
-        const profile = signalType === SignalType.SPOT ? this.SPOT_PROFILE : this.FUTURES_PROFILE;
-        if (confidence < profile.minConfidence) {
-            return null; // Signal doesn't meet quality threshold for this type
-        }
 
         // ============================================
         // PREDICTIVE AI INTEGRATION
@@ -337,94 +206,6 @@ export class SignalGenerator {
         } catch (error) {
             console.error('Prediction engine error:', error);
             // Continue without predictions if there's an error
-        }
-
-        // Calculate entry, stop loss, and take profit with improved logic
-        const entryPrice = currentPrice;
-        let stopLoss: number;
-        let takeProfit: number;
-
-        // Calculate ATR (true range) for volatility-based targets
-        const atr = this.calculateATR(prices, marketData.highs, marketData.lows);
-
-        // Multipliers depend on confidence only - sentiment never moves levels.
-        // Higher confidence = wider TP, tighter SL
-        const confidenceMultiplier = confidence / 100;
-
-        if (direction === SignalDirection.BUY || direction === SignalDirection.LONG) {
-            // For buy signals
-            // Stop loss: tighter for high confidence
-            const slMultiplier = 1.5 - (confidenceMultiplier * 0.3);
-            stopLoss = entryPrice - (atr * slMultiplier);
-
-            // Take profit target
-            const tpMultiplier = 3.5 + (confidenceMultiplier * 2.5);
-            takeProfit = entryPrice + (atr * tpMultiplier);
-
-            // Adjust stop based on Bollinger Bands
-            if (stopLoss > bollingerBands.lower) {
-                stopLoss = bollingerBands.lower * 0.995;
-            }
-        } else {
-            // For sell signals
-            // Stop loss: tighter for high confidence
-            const slMultiplier = 1.5 - (confidenceMultiplier * 0.3);
-            stopLoss = entryPrice + (atr * slMultiplier);
-
-            // Take profit target
-            const tpMultiplier = 3.5 + (confidenceMultiplier * 2.5);
-            takeProfit = entryPrice - (atr * tpMultiplier);
-
-            // Adjust stop based on Bollinger Bands
-            if (stopLoss < bollingerBands.upper) {
-                stopLoss = bollingerBands.upper * 1.005;
-            }
-        }
-
-
-        // Calculate Partial Take Profits (TP1, TP2, TP3)
-        let takeProfit1: number;
-        let takeProfit2: number;
-        let takeProfit3: number;
-
-        if (direction === SignalDirection.BUY || direction === SignalDirection.LONG) {
-            // For LONG/BUY: TP1 at 25%, TP2 at 65%, TP3 at 85% of the move (OPTIMIZED)
-            let tpDistance = takeProfit - entryPrice;
-
-            // Ensure minimum distance (at least 0.5% of entry price)
-            const minDistance = entryPrice * 0.005; // 0.5% minimum
-            if (tpDistance < minDistance) {
-                tpDistance = minDistance;
-                takeProfit = entryPrice + tpDistance; // Adjust main TP as well
-            }
-
-            takeProfit1 = entryPrice + (tpDistance * 0.25); // 25% of move (realistic first target)
-            takeProfit2 = entryPrice + (tpDistance * 0.65); // 65% of move (solid profit)
-            takeProfit3 = entryPrice + (tpDistance * 0.85); // 85% (achievable final target)
-        } else {
-            // For SHORT/SELL: TP1 at 25%, TP2 at 65%, TP3 at 85% of the move (OPTIMIZED)
-            let tpDistance = entryPrice - takeProfit;
-
-            // Ensure minimum distance (at least 0.5% of entry price)
-            const minDistance = entryPrice * 0.005; // 0.5% minimum
-            if (tpDistance < minDistance) {
-                tpDistance = minDistance;
-                takeProfit = entryPrice - tpDistance; // Adjust main TP as well
-            }
-
-            takeProfit1 = entryPrice - (tpDistance * 0.25); // 25% of move (realistic first target)
-            takeProfit2 = entryPrice - (tpDistance * 0.65); // 65% of move (solid profit)
-            takeProfit3 = entryPrice - (tpDistance * 0.85); // 85% (achievable final target)
-
-        }
-
-        // Final validation: Ensure all prices are valid before creating signal
-        const pricesToValidate = [entryPrice, stopLoss, takeProfit, takeProfit1, takeProfit2, takeProfit3];
-        const hasInvalidPrice = pricesToValidate.some(p => !p || isNaN(p) || !isFinite(p) || p <= 0);
-
-        if (hasInvalidPrice) {
-            console.error(`⚠️ Skipping ${pair} - invalid TP/SL prices detected`);
-            return null;
         }
 
         // Generate signal ID
@@ -547,85 +328,6 @@ export class SignalGenerator {
     }
 
     /**
-     * Calculate ATR (Average True Range) for stop loss/take profit.
-     *
-     * Uses the TRUE RANGE of each candle:
-     *   TR = max(high - low, |high - prevClose|, |low - prevClose|)
-     * The previous implementation used only |close - prevClose|, which
-     * ignores intra-candle ranges and produced noise-tight stops.
-     * When candle highs/lows are unavailable (e.g. forex feed), it falls
-     * back to the close-to-close change.
-     * @param prices Array of closing prices
-     * @param highs Optional array of candle highs (same order as prices)
-     * @param lows Optional array of candle lows (same order as prices)
-     * @param period Period for ATR calculation
-     * @returns ATR value
-     */
-    private static calculateATR(
-        prices: number[],
-        highs?: number[],
-        lows?: number[],
-        period: number = 14
-    ): number {
-        if (prices.length < period + 1) {
-            return prices[prices.length - 1] * 0.02; // 2% fallback
-        }
-
-        const hasOHLC = highs && lows && highs.length === prices.length && lows.length === prices.length;
-
-        const trueRanges: number[] = [];
-
-        for (let i = 1; i < prices.length; i++) {
-            const prevClose = prices[i - 1];
-            let tr: number;
-            if (hasOHLC) {
-                const high = highs[i];
-                const low = lows[i];
-                tr = Math.max(
-                    high - low,
-                    Math.abs(high - prevClose),
-                    Math.abs(low - prevClose)
-                );
-            } else {
-                tr = Math.abs(prices[i] - prevClose);
-            }
-            trueRanges.push(tr);
-        }
-
-        const atr = trueRanges.slice(-period).reduce((a, b) => a + b, 0) / period;
-        return atr;
-    }
-
-    /**
-     * Calculate Momentum (rate of price change)
-     * @param prices Array of prices
-     * @param period Period for momentum calculation
-     * @returns Momentum value (-5 to +5 scale)
-     */
-    private static calculateMomentum(prices: number[], period: number = 10): number {
-        if (prices.length < period + 1) return 0;
-
-        const recentPrices = prices.slice(-period);
-        let upMoves = 0;
-        let downMoves = 0;
-        let totalChange = 0;
-
-        for (let i = 1; i < recentPrices.length; i++) {
-            const change = recentPrices[i] - recentPrices[i - 1];
-            totalChange += change;
-            if (change > 0) upMoves++;
-            else if (change < 0) downMoves++;
-        }
-
-        const avgChange = totalChange / period;
-        const currentPrice = prices[prices.length - 1];
-        const momentum = (avgChange / currentPrice) * 100; // Percentage
-
-        // Scale to -5 to +5 range
-        return Math.max(-5, Math.min(5, momentum * 50));
-    }
-
-    /**
      * Calculate current RSI from price array (for real-time updates)
      * @param prices Array of prices
      * @returns Current RSI value
@@ -633,21 +335,6 @@ export class SignalGenerator {
     static calculateCurrentRSI(prices: number[]): number | null {
         if (prices.length < 14) return null;
         return TechnicalIndicators.calculateRSI(prices);
-    }
-
-    /**
-     * Calculate Rate of Change (ROC)
-     * @param prices Array of prices
-     * @param period Period for ROC calculation
-     * @returns ROC percentage (-100 to +100)
-     */
-    private static calculateROC(prices: number[], period: number = 10): number {
-        if (prices.length < period + 1) return 0;
-
-        const currentPrice = prices[prices.length - 1];
-        const oldPrice = prices[prices.length - period - 1];
-
-        return ((currentPrice - oldPrice) / oldPrice) * 100;
     }
 
     /**
@@ -779,13 +466,14 @@ export class SignalGenerator {
     static async generateMultipleSignals(
         marketDataList: MarketData[],
         signalType: SignalType,
-        timeframe: Timeframe = Timeframe.ONE_HOUR
+        timeframe: Timeframe = Timeframe.ONE_HOUR,
+        rules: EngineRuleSwitches = DEFAULT_RULES
     ): Promise<Signal[]> {
         // Use Promise.allSettled for parallel processing
         // This allows all signals to generate simultaneously instead of one-by-one
         const results = await Promise.allSettled(
             marketDataList.map(marketData =>
-                this.generateSignal(marketData, signalType, timeframe)
+                this.generateSignal(marketData, signalType, timeframe, rules)
             )
         );
 
@@ -848,23 +536,6 @@ export class SignalGenerator {
             accuracyRate,
             averageProfit
         };
-    }
-
-    /**
-     * Check if signal direction contradicts market trend
-     * @param direction Signal direction
-     * @param trend Market trend
-     * @returns True if counter-trend signal
-     */
-    private static isCounterTrendSignal(direction: SignalDirection, trend: string): boolean {
-        const isBullishSignal = direction === SignalDirection.BUY || direction === SignalDirection.LONG;
-        const isBearishSignal = direction === SignalDirection.SELL || direction === SignalDirection.SHORT;
-
-        const isBearishMarket = trend === 'BEARISH' || trend === 'STRONG_BEARISH';
-        const isBullishMarket = trend === 'BULLISH' || trend === 'STRONG_BULLISH';
-
-        // Counter-trend: LONG in bearish market OR SHORT in bullish market
-        return (isBullishSignal && isBearishMarket) || (isBearishSignal && isBullishMarket);
     }
 
     /**

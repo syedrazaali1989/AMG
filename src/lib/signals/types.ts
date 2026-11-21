@@ -318,6 +318,17 @@ export interface MarketData {
   volumes: number[];
   timestamps: Date[];
   currentPrice: number;
+  // --- Optional context for the signal-quality filters (engineCore) ---
+  // 4H candle closes for the same pair, oldest first; the last entry may be
+  // the in-progress 4H candle (its close = latest 1H close). Used by the
+  // multi-timeframe confirmation filter. Absent = filter does not block.
+  closes4h?: number[];
+  // Market-wide BTC regime from BTCUSDT price vs its 4H EMA200:
+  // 'UP' = price above EMA200, 'DOWN' = below. Absent/'NEUTRAL' = no block.
+  btcTrend?: 'UP' | 'DOWN' | 'NEUTRAL';
+  // Latest futures funding rate as a decimal fraction (0.0005 = 0.05%).
+  // Undefined = unavailable, treated as neutral by the funding filter.
+  fundingRate?: number;
 }
 
 export interface SignalAccuracy {
