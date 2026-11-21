@@ -52,9 +52,6 @@ export default function OnChainCompletedPage() {
                             signal.takeProfit2 = signal.entryPrice - (tpDistance * 0.60);
                             signal.takeProfit3 = signal.takeProfit;
                         }
-                        signal.tp1Hit = true;
-                        signal.tp2Hit = true;
-                        signal.tp3Hit = true;
                     }
 
                     const timestamp = signal.completedAt || new Date().toISOString();
@@ -85,7 +82,10 @@ export default function OnChainCompletedPage() {
     const profitableSignals = completedSignals.filter(s => (s.profitLossPercentage || 0) > 0);
     const totalProfit = completedSignals.reduce((sum, s) => sum + (s.profitLossPercentage || 0), 0);
     const avgProfit = completedSignals.length > 0 ? totalProfit / completedSignals.length : 0;
-    const winRate = completedSignals.length > 0 ? (profitableSignals.length / completedSignals.length) * 100 : 0;
+    // Honest win rate: full-TP completions over resolved (TP + SL) signals; EXPIRED excluded
+    const winCount = completedSignals.filter(s => s.status === 'COMPLETED').length;
+    const lossCount = completedSignals.filter(s => s.status === 'STOPPED').length;
+    const winRate = (winCount + lossCount) > 0 ? (winCount / (winCount + lossCount)) * 100 : 0;
 
     // BTC vs Altcoin stats
     const btcProfitable = btcSignals.filter(s => (s.profitLossPercentage || 0) > 0);

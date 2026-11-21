@@ -1,5 +1,7 @@
 // Google News API Integration
-// Uses GNews API with fallback to enhanced simulated news
+// Uses the GNews API. There is NO simulated-news fallback: when no API key
+// is configured or the API fails, fetchNews returns an empty list and
+// sentiment is treated as neutral by callers.
 
 export interface NewsArticle {
     id: string;
@@ -60,7 +62,9 @@ export class GoogleNewsAPI {
     };
 
     /**
-     * Fetch news from GNews API (with fallback to enhanced simulation)
+     * Fetch news from the GNews API.
+     * Returns an empty array when no API key is configured or the request
+     * fails — fabricated/simulated articles are never substituted.
      */
     static async fetchNews(params: NewsSearchParams): Promise<NewsArticle[]> {
         const cacheKey = this.getCacheKey(params);
@@ -71,21 +75,20 @@ export class GoogleNewsAPI {
             return cached.articles;
         }
 
-        // Try real API if key is available
+        // Real API only, and only when a key is configured
         if (this.GNEWS_API_KEY) {
             try {
                 const articles = await this.fetchFromGNews(params);
                 this.newsCache.set(cacheKey, { articles, timestamp: Date.now() });
                 return articles;
             } catch (error) {
-                console.warn('GNews API failed, falling back to simulated news:', error);
+                console.warn('GNews API failed; treating news sentiment as neutral:', error);
             }
         }
 
-        // Fallback to enhanced simulated news
-        const articles = this.generateEnhancedSimulatedNews(params);
-        this.newsCache.set(cacheKey, { articles, timestamp: Date.now() });
-        return articles;
+        // No real news available -> empty (neutral sentiment upstream)
+        this.newsCache.set(cacheKey, { articles: [], timestamp: Date.now() });
+        return [];
     }
 
     /**
@@ -127,114 +130,6 @@ export class GoogleNewsAPI {
         };
     }
 
-    /**
-     * Generate enhanced simulated news (realistic and dynamic)
-     */
-    private static generateEnhancedSimulatedNews(params: NewsSearchParams): NewsArticle[] {
-        const articles: NewsArticle[] = [];
-        const now = new Date();
-        const maxResults = params.maxResults || 10;
-
-        // Generate varied realistic news based on keywords
-        const newsTemplates = this.getNewsTemplates(params.keywords);
-
-        for (let i = 0; i < Math.min(maxResults, newsTemplates.length); i++) {
-            const template = newsTemplates[i];
-            const hoursAgo = Math.random() * 12; // Last 12 hours
-            const publishedAt = new Date(now.getTime() - hoursAgo * 60 * 60 * 1000);
-
-            articles.push({
-                id: `sim-${Date.now()}-${i}`,
-                title: template.title,
-                description: template.description,
-                url: `https://example.com/news/${i}`,
-                source: template.source,
-                publishedAt,
-                keywords: params.keywords,
-                sentiment: template.sentiment,
-                urgency: this.determineUrgency(publishedAt),
-                credibility: this.getSourceCredibility(template.source),
-            });
-        }
-
-        return articles;
-    }
-
-    /**
-     * Get realistic news templates based on keywords
-     */
-    private static getNewsTemplates(keywords: string[]): Array<{
-        title: string;
-        description: string;
-        source: string;
-        sentiment: number;
-    }> {
-        const templates: Array<{ title: string; description: string; source: string; sentiment: number }> = [];
-
-        // Check which category matches
-        const keywordStr = keywords.join(' ').toLowerCase();
-
-        if (keywordStr.includes('federal reserve') || keywordStr.includes('interest')) {
-            templates.push(
-                { title: 'Fed Signals Pause in Rate Hikes', description: 'Federal Reserve officials indicate potential pause in monetary tightening cycle amid cooling inflation.', source: 'Bloomberg', sentiment: 0.7 },
-                { title: 'Markets Rally on Dovish Fed Comments', description: 'Stocks surge as Fed Chair suggests data-dependent approach to future rate decisions.', source: 'Reuters', sentiment: 0.8 },
-                { title: 'Fed Minutes Reveal Split on Rate Path', description: 'FOMC minutes show disagreement among members on pace of future rate adjustments.', source: 'Wall Street Journal', sentiment: 0.2 },
-            );
-        }
-
-        if (keywordStr.includes('inflation')) {
-            templates.push(
-                { title: 'CPI Data Shows Inflation Cooling', description: 'Consumer price index rises 3.2%, below expectations, marking third consecutive decline.', source: 'Bloomberg', sentiment: 0.6 },
-                { title: 'Inflation Remains Sticky in Core Categories', description: 'Core CPI excluding food and energy holds above Fed target, complicating policy outlook.', source: 'Financial Times', sentiment: -0.4 },
-            );
-        }
-
-        if (keywordStr.includes('gdp') || keywordStr.includes('economic')) {
-            templates.push(
-                { title: 'Q3 GDP Growth Beats Estimates', description: 'US economy expands 5.2% annualized, driven by consumer spending and business investment.', source: 'Reuters', sentiment: 0.8 },
-                { title: 'Economic Slowdown Concerns Mount', description: 'Leading indicators point to potential recession as manufacturing contracts for third month.', source: 'CNBC', sentiment: -0.6 },
-            );
-        }
-
-        if (keywordStr.includes('geopolitical') || keywordStr.includes('tensions')) {
-            templates.push(
-                { title: 'Trade Talks Resume Amid Optimism', description: 'US and China restart negotiations on tariff reductions, boosting risk appetite.', source: 'Reuters', sentiment: 0.5 },
-                { title: 'Geopolitical Tensions Escalate', description: 'Diplomatic standoff deepens as sanctions threaten global supply chains.', source: 'Bloomberg', sentiment: -0.7 },
-            );
-        }
-
-        if (keywordStr.includes('bitcoin') || keywordStr.includes('crypto')) {
-            templates.push(
-                { title: 'Bitcoin ETF Sees Record Inflows', description: 'Spot Bitcoin ETFs attract $500M in single day as institutional adoption accelerates.', source: 'CoinDesk', sentiment: 0.9 },
-                { title: 'Regulatory Clarity Boosts Crypto Markets', description: 'SEC chair signals framework for digital asset regulation, reducing uncertainty.', source: 'The Block', sentiment: 0.7 },
-                { title: 'Crypto Exchange Faces Probe', description: 'Major exchange under investigation for potential securities violations.', source: 'CoinTelegraph', sentiment: -0.5 },
-            );
-        }
-
-        if (keywordStr.includes('oil') || keywordStr.includes('crude')) {
-            templates.push(
-                { title: 'Oil Surges on Supply Cut Extension', description: 'OPEC+ announces production cuts through Q2, sending crude above $85/barrel.', source: 'Reuters', sentiment: 0.6 },
-                { title: 'Oil Prices Tumble on Demand Concerns', description: 'Weak Chinese data triggers selloff in energy markets as recession fears grow.', source: 'Bloomberg', sentiment: -0.7 },
-            );
-        }
-
-        if (keywordStr.includes('earnings') || keywordStr.includes('corporate')) {
-            templates.push(
-                { title: 'Tech Giants Beat Earnings Expectations', description: 'Major tech companies report stronger-than-expected quarterly results, lifting sentiment.', source: 'Wall Street Journal', sentiment: 0.8 },
-                { title: 'Earnings Season Disappoints', description: 'Corporate profit warnings increase as margin pressures mount.', source: 'MarketWatch', sentiment: -0.5 },
-            );
-        }
-
-        // Default general financial news if no specific match
-        if (templates.length === 0) {
-            templates.push(
-                { title: 'Markets Consolidate After Rally', description: 'Major indices trade in narrow range as investors await catalysts.', source: 'CNBC', sentiment: 0.1 },
-                { title: 'Volatility Expected Ahead of Data', description: 'Option markets pricing increased movement around key economic releases.', source: 'Bloomberg', sentiment: 0.0 },
-            );
-        }
-
-        return templates;
-    }
 
     /**
      * Analyze sentiment from text (simple keyword-based)

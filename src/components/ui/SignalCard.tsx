@@ -23,7 +23,8 @@ export function SignalCard({ signal, onClick }: SignalCardProps) {
     const statusColors = {
         [SignalStatus.ACTIVE]: 'border-primary/50 bg-primary/5',
         [SignalStatus.COMPLETED]: isProfit ? 'border-success/50 bg-success/5' : 'border-muted/50 bg-muted/5',
-        [SignalStatus.STOPPED]: 'border-danger/50 bg-danger/5'
+        [SignalStatus.STOPPED]: 'border-danger/50 bg-danger/5',
+        [SignalStatus.EXPIRED]: 'border-muted/50 bg-muted/5'
     };
 
     const directionColors = isBuy

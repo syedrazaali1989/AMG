@@ -19,8 +19,9 @@ export enum SignalDirection {
 
 export enum SignalStatus {
   ACTIVE = 'ACTIVE',
-  COMPLETED = 'COMPLETED',
-  STOPPED = 'STOPPED'
+  COMPLETED = 'COMPLETED', // Full take profit reached before stop loss
+  STOPPED = 'STOPPED',     // Stop loss reached before full take profit
+  EXPIRED = 'EXPIRED'      // Neither TP nor SL reached before expiry
 }
 
 export enum Timeframe {
@@ -213,6 +214,10 @@ export interface Signal {
   expiresAt?: Date;
   profitLoss?: number;
   profitLossPercentage?: number;
+  // Realised exit price for closed signals (TP price, SL price, or price at expiry).
+  // While a signal is ACTIVE, profitLoss is only a live mark; once closed it is
+  // recomputed from exitPrice.
+  exitPrice?: number;
   // Track highest/lowest prices to detect TP hits
   highestPrice?: number;
   lowestPrice?: number;
@@ -308,6 +313,8 @@ export interface MarketData {
   pair: string;
   marketType: MarketType;
   prices: number[];
+  highs?: number[]; // Candle highs (same length/order as prices) when the source provides OHLC
+  lows?: number[];  // Candle lows (same length/order as prices) when the source provides OHLC
   volumes: number[];
   timestamps: Date[];
   currentPrice: number;

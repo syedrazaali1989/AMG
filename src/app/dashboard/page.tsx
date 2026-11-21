@@ -19,6 +19,7 @@ import { motion } from 'framer-motion';
 export default function DashboardPage() {
     const [signals, setSignals] = useState<Signal[]>([]);
     const [isLoading, setIsLoading] = useState(false);
+    const [dataUnavailable, setDataUnavailable] = useState(false);
     const [loadingProgress, setLoadingProgress] = useState(0); // 0-100
     const [loadingStatus, setLoadingStatus] = useState('Initializing...'); // Status message
     const [selectedMarket, setSelectedMarket] = useState<'CRYPTO' | 'FOREX' | null>(null);
@@ -214,13 +215,16 @@ const updateSignalPrices = useCallback(async () => {
                                     console.error(`Failed to fetch RSI for ${signal.pair}:`, error);
                                 }
                             } else {
-                                const change = (Math.random() - 0.5) * 0.001;
-                                newPrice = signal.currentPrice * (1 + change);
+                                // No live price source is fabricated here: forex
+                                // signals keep their last known price.
+                                newPrice = signal.currentPrice;
                             }
 
                             const updatedSignal = SignalGenerator.updateSignal(signal, newPrice);
 
-                            if (updatedSignal.status === 'COMPLETED' && signal.status !== 'COMPLETED') {
+                            // Any close (full TP, stop loss, or expiry) moves the
+                            // signal to the record with its realised P/L.
+                            if (updatedSignal.status !== 'ACTIVE' && signal.status === 'ACTIVE') {
                                 const completedSignals = JSON.parse(localStorage.getItem('completedSignals') || '[]');
                                 completedSignals.push({
                                     ...updatedSignal,
@@ -228,10 +232,17 @@ const updateSignalPrices = useCallback(async () => {
                                 });
                                 localStorage.setItem('completedSignals', JSON.stringify(completedSignals));
 
-                                showSuccess(
-                                    `🎯 TP Hit: ${signal.pair}`,
-                                    `Profit: ${updatedSignal.profitLossPercentage?.toFixed(2)}%`
-                                );
+                                if (updatedSignal.status === 'COMPLETED') {
+                                    showSuccess(
+                                        `🎯 Full TP Hit: ${signal.pair}`,
+                                        `Profit: ${updatedSignal.profitLossPercentage?.toFixed(2)}%`
+                                    );
+                                } else {
+                                    showInfo(
+                                        `${signal.pair} closed (${updatedSignal.status})`,
+                                        `Result: ${updatedSignal.profitLossPercentage?.toFixed(2)}%`
+                                    );
+                                }
                             }
 
                             return { ...updatedSignal, mexcPrice, currentRsi };
@@ -280,6 +291,7 @@ const generateSignals = async () => {
     }
 
     setIsLoading(true);
+    setDataUnavailable(false);
     setLoadingProgress(0);
     setLoadingStatus('Preparing market analysis...');
     // Clear existing signals to prevent TP carry-over
@@ -287,43 +299,33 @@ const generateSignals = async () => {
     setNotifications([]);
 
     try {
-        setLoadingProgress(10);
-        setLoadingStatus('Fetching market data...');
-
-        const allPairs = MarketDataManager.getAllPairs();
-        const filteredPairs = allPairs.filter(({ marketType }) =>
-            selectedMarket === 'CRYPTO' ? marketType === MarketType.CRYPTO : marketType === MarketType.FOREX
-        );
-
         setLoadingProgress(25);
-        setLoadingStatus(`Analyzing ${filteredPairs.length} pairs...`);
+        setLoadingStatus('Fetching live signals from server...');
 
-        const marketDataList = await Promise.all(
-            filteredPairs.map(({ pair, marketType }) =>
-                MarketDataManager.generateMarketData(pair, marketType, 100)
-            )
-        );
+        // Signals are generated server-side (/api/signals) from live Binance
+        // data so every visitor sees the same signals. If live data cannot
+        // be loaded, NO signals are shown - never simulated ones.
+        const response = await fetch(`/api/signals?market=${selectedMarket}&type=${selectedType}`);
 
-        setLoadingProgress(50);
-        setLoadingStatus('Running parallel signal generation...');
+        if (!response.ok) {
+            throw new Error(`Signals request failed: ${response.status}`);
+        }
 
-        const signalTypeEnum = selectedType === 'SPOT' ? SignalType.SPOT : SignalType.FUTURE;
-        const generatedSignals = await SignalGenerator.generateMultipleSignals(marketDataList, signalTypeEnum);
-
-        setLoadingProgress(90);
-        setLoadingStatus('Finalizing results...');
-
-        // Completely replace with fresh signals
-        setSignals(generatedSignals);
+        const data = await response.json();
+        const generatedSignals = (data.signals || []) as Signal[];
 
         setLoadingProgress(100);
         setLoadingStatus('Complete!');
         setIsLoading(false);
 
+        // Store via SignalManager so the periodic loader keeps displaying them
+        SignalManager.setActiveSignals(generatedSignals, 'standard');
+        setSignals(generatedSignals);
+
         if (generatedSignals.length > 0) {
             showSuccess(
                 `${generatedSignals.length} ${selectedMarket} ${selectedType} Signals`,
-                '75%+ accuracy with real-time prices'
+                'Generated server-side from live prices'
             );
 
             // Add notifications for new signals (limit to top 3 to avoid clutter)
@@ -337,7 +339,10 @@ const generateSignals = async () => {
         }
     } catch (error) {
         console.error('Error:', error);
-        setLoadingStatus('Error loading signals');
+        // Live data unavailable: show an explicit empty state, not fake signals
+        setSignals([]);
+        setDataUnavailable(true);
+        setLoadingStatus('Live data unavailable');
         setIsLoading(false);
     }
 };
@@ -361,7 +366,7 @@ return (
                 <div className="flex flex-col gap-6">
                     <div>
                         <h1 className="text-4xl font-bold text-gradient mb-2">Standard Trading Signals</h1>
-                        <p className="text-muted-foreground">Medium-term opportunities with 75%+ accuracy</p>
+                        <p className="text-muted-foreground">Medium-term opportunities from live market data</p>
                     </div>
 
                     {/* Step 1: Select Market Type */}
@@ -399,7 +404,7 @@ return (
                                         // Load signals after selection
                                         setTimeout(() => {
                                             generateSignals();
-                                            showInfo('CRYPTO SPOT Signals', 'Viewing live signals with 75%+ accuracy');
+                                            showInfo('CRYPTO SPOT Signals', 'Viewing live server-generated signals');
                                         }, 100);
                                     }}
                                     className={`px-6 py-3 rounded-lg font-bold transition-all ${selectedType === 'SPOT'
@@ -417,7 +422,7 @@ return (
                                         // Load signals after selection
                                         setTimeout(() => {
                                             generateSignals();
-                                            showInfo('CRYPTO FUTURE Signals', 'Viewing live signals with 75%+ accuracy');
+                                            showInfo('CRYPTO FUTURE Signals', 'Viewing live server-generated signals');
                                         }, 100);
                                     }}
                                     className={`px-6 py-3 rounded-lg font-bold transition-all ${selectedType === 'FUTURE'
@@ -440,7 +445,7 @@ return (
                     title="Accuracy Rate"
                     value={`${stats.accuracyRate.toFixed(1)}%`}
                     icon={Award}
-                    trend={stats.totalSignals > 0 ? { value: stats.accuracyRate - 85, isPositive: stats.accuracyRate >= 75 } : undefined}
+                    
                 />
                 <StatsCard
                     title="Avg Profit"
@@ -581,7 +586,19 @@ return (
                         </div>
                     </div>
 
-                    <SignalList signals={filteredSignals} />
+                    {dataUnavailable ? (
+                        <div className="glass rounded-lg p-12 text-center">
+                            <div className="space-y-4">
+                                <div className="text-2xl font-bold text-danger">Live Data Unavailable</div>
+                                <div className="text-muted-foreground">
+                                    Live market data could not be loaded, so no signals are shown.
+                                    Signals are never generated from simulated prices - please try again shortly.
+                                </div>
+                            </div>
+                        </div>
+                    ) : (
+                        <SignalList signals={filteredSignals} />
+                    )}
                 </>
             )}
         </div>

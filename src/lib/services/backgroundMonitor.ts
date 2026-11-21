@@ -1,11 +1,15 @@
-import { Signal, MarketType } from '../signals/types';
+import { Signal, MarketType, SignalStatus } from '../signals/types';
 import { SignalManager } from './signalManager';
+import { SignalGenerator } from '../signals/generator';
 import { fetchBinancePrice } from '../utils/binancePrices';
 import { ExnessAPI } from '../signals/exnessAPI';
 
 /**
  * Background Monitor Service
- * Continuously monitors prices and auto-completes signals
+ * Continuously monitors REAL prices and closes signals using the shared
+ * honest outcome rules (full TP = COMPLETED, SL = STOPPED, expiry = EXPIRED).
+ * If a real price cannot be fetched, the signal is simply not updated -
+ * prices are never simulated.
  */
 
 export class BackgroundMonitor {
@@ -92,58 +96,32 @@ export class BackgroundMonitor {
         // Update each signal
         for (const signal of signals) {
             try {
-                // Simulate price movement (or fetch real price)
+                // Fetch a REAL price. If unavailable, skip this signal -
+                // never substitute a simulated price.
                 const newPrice = await this.fetchNewPrice(signal);
-
-                // Calculate RSI change based on price movement
-                const priceChange = (newPrice - signal.currentPrice) / signal.currentPrice;
-                const oldRsi = signal.currentRsi || signal.rsi || 50;
-                let newRsi = oldRsi;
-
-                if (priceChange > 0) {
-                    newRsi = Math.min(oldRsi + Math.abs(priceChange) * 500, 100);
-                } else {
-                    newRsi = Math.max(oldRsi - Math.abs(priceChange) * 500, 0);
+                if (newPrice === null) {
+                    continue;
                 }
 
-                newRsi = Math.max(0, Math.min(100, newRsi + (Math.random() - 0.5) * 2));
+                // Apply the shared outcome logic: partial TPs are milestones,
+                // only the FULL take profit completes a signal, the stop loss
+                // stops it, and expiry marks it EXPIRED. Realised P/L is set
+                // at the exit price by the updater.
+                const updatedSignal = SignalGenerator.updateSignal(signal, newPrice);
 
-                // Check TP/SL levels
-                const { tp1Hit, tp2Hit, tp3Hit, profitLoss } = this.checkTPSL(signal, newPrice);
-
-                // Update signal
-                const updatedSignal: Signal = {
-                    ...signal,
-                    currentPrice: newPrice,
-                    currentRsi: Math.round(newRsi),
-                    tp1Hit: signal.tp1Hit || tp1Hit,
-                    tp2Hit: signal.tp2Hit || tp2Hit,
-                    tp3Hit: signal.tp3Hit || tp3Hit,
-                    highestPrice: Math.max(signal.highestPrice || newPrice, newPrice),
-                    lowestPrice: Math.min(signal.lowestPrice || newPrice, newPrice),
-                    profitLossPercentage: profitLoss,
-                    tp1HitTime: tp1Hit && !signal.tp1Hit ? new Date() : signal.tp1HitTime,
-                    tp2HitTime: tp2Hit && !signal.tp2Hit ? new Date() : signal.tp2HitTime,
-                    tp3HitTime: tp3Hit && !signal.tp3Hit ? new Date() : signal.tp3HitTime,
-                };
-
-                // Auto-complete ONLY if TP2 or TP3 hit FOR THE FIRST TIME and TP1 was already hit
-                // This prevents signals from completing without hitting any TP
-                const tp2JustHit = tp2Hit && !signal.tp2Hit;
-                const tp3JustHit = tp3Hit && !signal.tp3Hit;
-                const shouldComplete = (tp2JustHit || tp3JustHit) && signal.tp1Hit;
-
-                if (shouldComplete) {
-                    console.log(`✅ Auto-completing signal: ${signal.pair} ${signal.direction} (+${profitLoss.toFixed(2)}%) [TP1✓ TP2${signal.tp2Hit ? '✓' : tp2JustHit ? '🆕' : '⏳'} TP3${signal.tp3Hit ? '✓' : tp3JustHit ? '🆕' : '⏳'}]`);
-
-                    // Add to completed signals
-                    updatedSignal.status = 'COMPLETED' as any;
+                if (updatedSignal.status !== SignalStatus.ACTIVE) {
+                    // Persist the closed state, then move it to the record
+                    SignalManager.updateSignal(updatedSignal, type);
                     SignalManager.completeSignal(signal.id, type);
 
-                    // Show browser notification (if permitted)
-                    this.showNotification(signal, profitLoss);
+                    if (updatedSignal.status === SignalStatus.COMPLETED) {
+                        console.log(`✅ Signal completed at full TP: ${signal.pair} ${signal.direction} (${(updatedSignal.profitLossPercentage || 0).toFixed(2)}%)`);
+                        this.showNotification(signal, updatedSignal.profitLossPercentage || 0);
+                    } else {
+                        console.log(`ℹ️ Signal closed as ${updatedSignal.status}: ${signal.pair} ${signal.direction} (${(updatedSignal.profitLossPercentage || 0).toFixed(2)}%)`);
+                    }
                 } else {
-                    // Just update the signal
+                    // Still active - just persist the price update
                     SignalManager.updateSignal(updatedSignal, type);
                 }
             } catch (error) {
@@ -154,95 +132,40 @@ export class BackgroundMonitor {
     }
 
     /**
-     * Fetch new price for a signal
+     * Fetch a REAL new price for a signal.
+     * Returns null when no real price is available - the caller then skips
+     * the update. (The previous implementation fabricated a random-walk
+     * price with a deliberate bias toward the TP target "to ensure signals
+     * complete in reasonable time"; that has been removed.)
      */
-    private static async fetchNewPrice(signal: Signal): Promise<number> {
-        // For crypto, try to fetch real Binance price
+    private static async fetchNewPrice(signal: Signal): Promise<number | null> {
+        // For crypto, fetch real Binance price
         if (signal.marketType === MarketType.CRYPTO) {
             try {
                 const realPrice = await fetchBinancePrice(signal.pair);
                 if (realPrice) {
-                    console.log(`📊 ${signal.pair}: Real Binance price = ${realPrice.toFixed(8)}`);
                     return realPrice;
                 }
             } catch (error) {
-                // Log CORS failure for monitoring
-                console.debug(`⚠️ ${signal.pair}: Binance fetch failed, using simulation`);
+                console.debug(`⚠️ ${signal.pair}: Binance fetch failed, skipping update`);
             }
+            return null;
         }
 
-        // For Forex, try to fetch Exness-compatible price
+        // For Forex, fetch Exness-compatible price
         if (signal.marketType === MarketType.FOREX) {
             try {
                 const realPrice = await ExnessAPI.getCurrentForexPrice(signal.pair);
                 if (realPrice) {
-                    console.log(`💱 ${signal.pair}: Real Exness price = ${realPrice.toFixed(5)}`);
                     return realPrice;
                 }
             } catch (error) {
-                console.debug(`⚠️ ${signal.pair}: Exness fetch failed, using simulation`);
+                console.debug(`⚠️ ${signal.pair}: Exness fetch failed, skipping update`);
             }
+            return null;
         }
 
-        // ENHANCED SIMULATION: More aggressive movement when real prices unavailable
-        // This ensures signals complete in reasonable time
-        const baseVolatility = signal.timeframe === '5m' ? 0.003 : 0.008; // Increased from 0.002/0.005
-
-        // Add directional bias based on TP targets
-        let directionBias = 0;
-        const isLong = signal.direction === 'LONG' || signal.direction === 'BUY';
-
-        // Check how far we are from TP2
-        if (signal.takeProfit2) {
-            const distanceToTP2 = isLong
-                ? (signal.takeProfit2 - signal.currentPrice) / signal.currentPrice
-                : (signal.currentPrice - signal.takeProfit2) / signal.currentPrice;
-
-            // Add slight upward bias if we're making progress toward TP
-            if (distanceToTP2 > 0 && distanceToTP2 < 0.03) { // Within 3% of TP2
-                directionBias = isLong ? 0.0015 : -0.0015; // 0.15% bias toward TP
-            }
-        }
-
-        const change = (Math.random() - 0.5) * baseVolatility + directionBias;
-        const newPrice = signal.currentPrice * (1 + change);
-
-        // Log simulation periodically (every ~10 updates)
-        if (Math.random() < 0.1) {
-            console.log(`🎲 ${signal.pair}: Simulated ${change > 0 ? '+' : ''}${(change * 100).toFixed(2)}% → ${newPrice.toFixed(8)}`);
-        }
-
-        return newPrice;
-    }
-
-    /**
-     * Check if TP/SL levels are hit
-     */
-    private static checkTPSL(signal: Signal, newPrice: number): {
-        tp1Hit: boolean;
-        tp2Hit: boolean;
-        tp3Hit: boolean;
-        profitLoss: number;
-    } {
-        const isLong = signal.direction === 'LONG' || signal.direction === 'BUY';
-
-        const tp1Hit = isLong
-            ? newPrice >= (signal.takeProfit1 || 0)
-            : newPrice <= (signal.takeProfit1 || Infinity);
-
-        const tp2Hit = isLong
-            ? newPrice >= (signal.takeProfit2 || 0)
-            : newPrice <= (signal.takeProfit2 || Infinity);
-
-        const tp3Hit = isLong
-            ? newPrice >= (signal.takeProfit3 || 0)
-            : newPrice <= (signal.takeProfit3 || Infinity);
-
-        const profitLoss = isLong
-            ? ((newPrice - signal.entryPrice) / signal.entryPrice) * 100
-            : ((signal.entryPrice - newPrice) / signal.entryPrice) * 100;
-
-        return { tp1Hit, tp2Hit, tp3Hit, profitLoss };
+        return null;
     }
 
     /**

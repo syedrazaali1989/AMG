@@ -164,40 +164,14 @@ export class NewsAnalyzer {
     }
 
     /**
-     * Get economic events (Simulated dynamic)
+     * Get economic events.
+     *
+     * There is no real economic-calendar data source in this codebase, and
+     * the previous implementation fabricated CPI/NFP values with Math.random.
+     * It now honestly returns an empty list, so economic sentiment is neutral.
      */
     static getEconomicEvents(): EconomicEvent[] {
-        const now = new Date();
-        // Randomize actual values slightly to create variety
-        const cpiActual = 3.0 + (Math.random() - 0.5) * 0.2;
-        const nfpActual = 250000 + (Math.random() - 0.5) * 50000;
-
-        return [
-            {
-                id: 'econ-1',
-                name: 'US Non-Farm Payrolls',
-                country: 'US',
-                expectedValue: 200000,
-                actualValue: Math.round(nfpActual),
-                previousValue: 220000,
-                impact: NewsImpact.CRITICAL,
-                sentiment: nfpActual > 220000 ? NewsSentiment.BULLISH : NewsSentiment.BEARISH,
-                affectedPairs: ['EUR/USD', 'GBP/USD', 'USD/JPY', 'BTC/USDT'],
-                timestamp: new Date(now.getTime() - 8 * 60 * 60 * 1000)
-            },
-            {
-                id: 'econ-3',
-                name: 'US Inflation Rate (CPI)',
-                country: 'US',
-                expectedValue: 3.2,
-                actualValue: parseFloat(cpiActual.toFixed(1)),
-                previousValue: 3.4,
-                impact: NewsImpact.CRITICAL,
-                sentiment: cpiActual < 3.2 ? NewsSentiment.VERY_BULLISH : NewsSentiment.BEARISH,
-                affectedPairs: ['ALL_FOREX', 'ALL_CRYPTO'],
-                timestamp: new Date(now.getTime() - 48 * 60 * 60 * 1000)
-            }
-        ];
+        return [];
     }
 
     /**
@@ -238,8 +212,10 @@ export class NewsAnalyzer {
         newsScore = newsCount > 0 ? newsScore / newsCount : 0;
         economicScore = economicCount > 0 ? economicScore / economicCount : 0;
 
-        // Combine all scores
-        const overall = (newsScore * 0.4) + (economicScore * 0.2) + (technicalScore * 0.4);
+        // Sentiment reflects news/economic inputs ONLY. It is never blended
+        // with the technical score and never gates signal issuance; with no
+        // real news available every component is 0 (neutral).
+        const overall = (newsScore * 0.6) + (economicScore * 0.4);
 
         return {
             overall: Math.max(-100, Math.min(100, overall)),

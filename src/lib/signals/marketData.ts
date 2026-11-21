@@ -6,133 +6,44 @@ import { MexcAPI } from './mexcAPI';
 import { ExnessAPI } from './exnessAPI';
 
 export class MarketDataManager {
-    static generateSimulatedData(
-        pair: string,
-        marketType: MarketType,
-        dataPoints: number = 100
-    ): MarketData {
-        const prices: number[] = [];
-        const volumes: number[] = [];
-        const timestamps: Date[] = [];
-
-        let basePrice = marketType === MarketType.FOREX ? 1.1 : 97500;
-
-        // Crypto specific prices
-        if (pair.includes('BTC')) basePrice = 97500;
-        if (pair.includes('ETH')) basePrice = 3350;
-        if (pair.includes('BNB')) basePrice = 620;
-        if (pair.includes('XRP')) basePrice = 1.42;
-        if (pair.includes('ADA')) basePrice = 0.98;
-        if (pair.includes('SOL')) basePrice = 131;
-        if (pair.includes('DOGE')) basePrice = 0.38;
-        if (pair.includes('DOT')) basePrice = 6.85;
-        if (pair.includes('MATIC')) basePrice = 0.52;
-        if (pair.includes('AVAX')) basePrice = 38.5;
-        if (pair.includes('LINK')) basePrice = 20.5;
-        if (pair.includes('UNI')) basePrice = 12.5;
-        if (pair.includes('LTC')) basePrice = 95;
-        if (pair.includes('ATOM')) basePrice = 9.8;
-        if (pair.includes('ETC')) basePrice = 28;
-        if (pair.includes('XLM')) basePrice = 0.12;
-        if (pair.includes('ALGO')) basePrice = 0.28;
-        if (pair.includes('VET')) basePrice = 0.035;
-        if (pair.includes('FIL')) basePrice = 5.2;
-        if (pair.includes('TRX')) basePrice = 0.19;
-        if (pair.includes('AAVE')) basePrice = 185;
-        if (pair.includes('SAND')) basePrice = 0.58;
-        if (pair.includes('MANA')) basePrice = 0.62;
-        if (pair.includes('AXS')) basePrice = 8.5;
-        if (pair.includes('THETA')) basePrice = 2.1;
-        if (pair.includes('FTM')) basePrice = 0.85;
-        if (pair.includes('NEAR')) basePrice = 5.8;
-        if (pair.includes('APE')) basePrice = 1.45;
-        if (pair.includes('SHIB')) basePrice = 0.000025;
-        if (pair.includes('CRO')) basePrice = 0.16;
-
-        // Forex specific prices
-        if (pair.includes('GBP')) basePrice = 1.27;
-        if (pair.includes('JPY')) basePrice = 150;
-        if (pair.includes('CHF')) basePrice = 0.88;
-        if (pair.includes('AUD')) basePrice = 0.65;
-        if (pair.includes('CAD')) basePrice = 1.39;
-        if (pair.includes('NZD')) basePrice = 0.59;
-        if (pair.includes('XAU')) basePrice = 2050; // Gold price
-
-        const now = new Date();
-
-        // Create more realistic market movements for Forex
-        // Add trending behavior and volatility
-        const trendDirection = Math.random() > 0.5 ? 1 : -1; // Random trend direction
-        const trendStrength = 0.0005 + Math.random() * 0.001; // 0.05% to 0.15% per candle (increased by 20%)
-
-        for (let i = 0; i < dataPoints; i++) {
-            // Combine trend with noise for realistic movement
-            const trend = trendDirection * trendStrength; // Consistent trend
-            const volatility = (Math.random() - 0.5) * 0.018; // ±0.9% random volatility (increased by 20%)
-            const microMovement = (Math.random() - 0.5) * 0.004; // Small noise (increased by 20%)
-
-            // Total change combines trend, volatility, and noise
-            const change = trend + volatility + microMovement;
-
-            basePrice = basePrice * (1 + change);
-            prices.push(basePrice);
-
-            const baseVolume = marketType === MarketType.FOREX ? 1000000 : 100;
-            const volume = baseVolume * (0.5 + Math.random());
-            volumes.push(volume);
-
-            const timestamp = new Date(now.getTime() - (dataPoints - i) * 60 * 60 * 1000);
-            timestamps.push(timestamp);
-        }
-
-        return {
-            pair,
-            marketType,
-            prices,
-            volumes,
-            timestamps,
-            currentPrice: prices[prices.length - 1]
-        };
-    }
-
+    /**
+     * Fetch REAL market data for a pair.
+     *
+     * There is deliberately NO simulated-data fallback: if the live source
+     * cannot be reached this throws, and callers must surface a
+     * "live data unavailable" state instead of generating signals from
+     * invented prices.
+     */
     static async generateMarketData(
         pair: string,
         marketType: MarketType,
         dataPoints: number = 100
     ): Promise<MarketData> {
         if (marketType === MarketType.CRYPTO) {
-            try {
-                const binanceData = await BinanceAPI.getMarketDataWithRealPrices(pair);
-                return {
-                    pair,
-                    marketType,
-                    prices: binanceData.prices,
-                    volumes: binanceData.volumes,
-                    timestamps: binanceData.timestamps,
-                    currentPrice: binanceData.currentPrice
-                };
-            } catch (error) {
-                console.warn(`Failed to fetch Binance data for ${pair}, using simulated data`);
-                return this.generateSimulatedData(pair, marketType, dataPoints);
-            }
+            const binanceData = await BinanceAPI.getMarketDataWithRealPrices(pair);
+            return {
+                pair,
+                marketType,
+                prices: binanceData.prices,
+                highs: binanceData.highs,
+                lows: binanceData.lows,
+                volumes: binanceData.volumes,
+                timestamps: binanceData.timestamps,
+                currentPrice: binanceData.currentPrice
+            };
         } else if (marketType === MarketType.FOREX) {
             // Use Exness-compatible Forex API for Forex pairs
-            try {
-                const exnessData = await ExnessAPI.getMarketDataWithExnessPrices(pair);
-                return {
-                    pair,
-                    marketType,
-                    prices: exnessData.prices,
-                    volumes: exnessData.volumes,
-                    timestamps: exnessData.timestamps,
-                    currentPrice: exnessData.currentPrice
-                };
-            } catch (error) {
-                console.warn(`Failed to fetch Exness data for ${pair}, using simulated data`);
-                return this.generateSimulatedData(pair, marketType, dataPoints);
-            }
+            const exnessData = await ExnessAPI.getMarketDataWithExnessPrices(pair);
+            return {
+                pair,
+                marketType,
+                prices: exnessData.prices,
+                volumes: exnessData.volumes,
+                timestamps: exnessData.timestamps,
+                currentPrice: exnessData.currentPrice
+            };
         }
-        return this.generateSimulatedData(pair, marketType, dataPoints);
+        throw new Error(`Unsupported market type for ${pair}: ${marketType}`);
     }
 
     static getForexPairs(): string[] {
@@ -246,19 +157,4 @@ export class MarketDataManager {
         }
     }
 
-    static updatePrice(marketData: MarketData): MarketData {
-        const lastPrice = marketData.currentPrice;
-        const change = (Math.random() - 0.5) * 0.005;
-        const newPrice = lastPrice * (1 + change);
-
-        return {
-            ...marketData,
-            currentPrice: newPrice,
-            prices: [...marketData.prices.slice(1), newPrice],
-            timestamps: [
-                ...marketData.timestamps.slice(1),
-                new Date()
-            ]
-        };
-    }
 }
