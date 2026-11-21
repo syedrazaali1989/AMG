@@ -22,16 +22,13 @@
 //     ROTATING OUT: shareMomentum <= -5% AND rsComposite < 0
 //     NEUTRAL     : everything else
 //
-// Signals are issued ONLY for classified pairs with a decisive score
-// (IN and score >= 55 -> LONG; OUT and score <= 45 -> SHORT) AND a
-// meaningful share of traded volume (shareNow >= 0.1%): below that
-// level a pair's share swings are dominated by noise (a single small
-// hour moves them by double-digit percentages), so its "rotation" is
-// not economically actionable. Levels use the repo's honest level
-// logic: stop = 1.5 x ATR(14, 1h, true range), targets on a
-// 1.5R / 3R / 5R ladder, final target = TP3. Every signal carries its
-// rotation evidence so the claim behind it can be checked against the
-// table on the page.
+// TRADE SIGNALS FROM THIS TABLE ARE DISABLED (2026-11-21). Signals
+// derived from this rotation table were backtested on 90 days of
+// market data and did not perform (resolved expectancy -0.92R per
+// trade at the 5R target, -0.15R at the 1.5R target - see
+// ROTATION-BACKTEST-REPORT.md), so the signal layer was removed.
+// This module now computes the rotation table only: market
+// information, not trading advice.
 //
 // There is NO fabricated data anywhere in this path: pairs whose candles
 // cannot be fetched or fail the freshness gate are excluded and counted;
@@ -39,16 +36,7 @@
 // caller gets an error and the page shows "live data unavailable".
 
 import { BinanceAPI } from './binanceAPI';
-import { calculateATR } from './engineCore';
 import { SCALPING_V2_PAIRS } from './scalpingV2';
-import {
-    MarketType,
-    Signal,
-    SignalDirection,
-    SignalStatus,
-    SignalType,
-    Timeframe
-} from './types';
 
 export type RotationClass = 'IN' | 'OUT' | 'NEUTRAL';
 
@@ -80,13 +68,8 @@ export interface RotationRow extends RotationEvidence {
     change24hPct: number;
 }
 
-export interface RotationSignal extends Signal {
-    rotation: RotationEvidence;
-}
-
 export interface MoneyRotationResult {
     rows: RotationRow[];
-    signals: RotationSignal[];
     btc: { change1hPct: number; change4hPct: number; change24hPct: number };
     totals: {
         pairsRequested: number;
@@ -99,12 +82,6 @@ export interface MoneyRotationResult {
 
 const HOURLY_MS = 60 * 60 * 1000;
 const KLINE_LIMIT = 49; // 48 full hours + in-progress hour
-const SIGNAL_EXPIRY_MS = 4 * 60 * 60 * 1000;
-const IN_SCORE_MIN = 55;
-const OUT_SCORE_MAX = 45;
-// Minimum last-24h quote-volume share (%) for a pair to be signalled.
-// Below this, share momentum is noise, not rotation (see header).
-const SIGNAL_MIN_SHARE_PCT = 0.1;
 
 interface PairWindows {
     pair: string;
@@ -150,7 +127,7 @@ async function loadPairWindows(pair: string): Promise<PairWindows> {
 }
 
 /**
- * Compute the money-rotation table and signals for the scan universe.
+ * Compute the money-rotation table for the scan universe.
  * Throws when the BTC benchmark or most of the universe is unavailable.
  */
 export async function computeMoneyRotation(
@@ -215,65 +192,8 @@ export async function computeMoneyRotation(
         };
     }).sort((a, b) => b.rotationScore - a.rotationScore);
 
-    // ---- Signals: decisive rotation only, honest ATR levels ----
-    const windowsByPair = new Map(loaded.map(p => [p.pair, p]));
-    const signals: RotationSignal[] = [];
-    const now = Date.now();
-
-    for (const row of rows) {
-        if (row.shareNow < SIGNAL_MIN_SHARE_PCT) continue;
-        const isLong = row.classification === 'IN' && row.rotationScore >= IN_SCORE_MIN;
-        const isShort = row.classification === 'OUT' && row.rotationScore <= OUT_SCORE_MAX;
-        if (!isLong && !isShort) continue;
-
-        const w = windowsByPair.get(row.pair);
-        if (!w) continue;
-
-        const atr = calculateATR(w.closes, w.highs, w.lows, 14);
-        if (!(atr > 0)) continue;
-
-        const entry = row.price;
-        const risk = 1.5 * atr;
-        const stopLoss = isLong ? entry - risk : entry + risk;
-        const tp1 = isLong ? entry + 1.5 * risk : entry - 1.5 * risk;
-        const tp2 = isLong ? entry + 3 * risk : entry - 3 * risk;
-        const tp3 = isLong ? entry + 5 * risk : entry - 5 * risk;
-
-        const evidence: RotationEvidence = { ...row };
-        const strength = isLong ? row.rotationScore : 100 - row.rotationScore;
-
-        const signal: RotationSignal = {
-            id: `rotation-${BinanceAPI.pairToBinanceSymbol(row.pair)}-${now}`,
-            marketType: MarketType.CRYPTO,
-            signalType: SignalType.FUTURE,
-            direction: isLong ? SignalDirection.LONG : SignalDirection.SHORT,
-            status: SignalStatus.ACTIVE,
-            pair: row.pair,
-            entryPrice: entry,
-            currentPrice: entry,
-            stopLoss,
-            takeProfit: tp3,
-            takeProfit1: tp1,
-            takeProfit2: tp2,
-            takeProfit3: tp3,
-            confidence: Math.round(strength),
-            timestamp: new Date(now),
-            expiresAt: new Date(now + SIGNAL_EXPIRY_MS),
-            timeframe: Timeframe.ONE_HOUR,
-            rationalePoints: [
-                `Money rotation: ${row.classification === 'IN' ? 'ROTATING IN' : 'ROTATING OUT'} - rotation score ${row.rotationScore.toFixed(1)}/100`,
-                `Quote-volume share ${row.sharePrev.toFixed(3)}% -> ${row.shareNow.toFixed(3)}% (${row.shareMomentumPct >= 0 ? '+' : ''}${row.shareMomentumPct.toFixed(1)}% share momentum)`,
-                `Relative strength vs BTC: 1h ${row.rs1h >= 0 ? '+' : ''}${row.rs1h.toFixed(2)}pp, 4h ${row.rs4h >= 0 ? '+' : ''}${row.rs4h.toFixed(2)}pp, 24h ${row.rs24h >= 0 ? '+' : ''}${row.rs24h.toFixed(2)}pp`,
-                `Levels: stop = 1.5 x ATR(14, 1h, true range); targets 1.5R / 3R / 5R. TP1/TP2 are milestones - the trade completes only at the final target.`
-            ],
-            rotation: evidence
-        };
-        signals.push(signal);
-    }
-
     return {
         rows,
-        signals,
         btc: {
             change1hPct: btc.change1h * 100,
             change4hPct: btc.change4h * 100,
