@@ -1,0 +1,1 @@
+{"compilerOptions":{"esModuleInterop":true,"forceConsistentCasingInFileNames":true,"module":"commonjs","moduleResolution":"node","outDir":"/tmp/amg-ict-build","rootDir":"..","skipLibCheck":true,"strict":true,"target":"ES2020","types":["node"]},"include":["ict-sanity.ts","../src/lib/signals/ictEngine.ts"]}
