@@ -9,8 +9,9 @@ export const dynamic = 'force-dynamic';
  * Money rotation across the scan universe, computed server-side from
  * live Binance data: each pair's quote-volume share (last 24h vs the
  * 24h before) and relative strength vs BTC (1h/4h/24h), combined into a
- * published rotation score. Signals are issued only for pairs rotating
- * decisively IN (long) or OUT (short), each carrying its evidence.
+ * published rotation score. Returns the rotation table only - trade
+ * signals derived from this table were backtested on 90 days of data,
+ * did not perform, and are disabled (2026-11-21).
  *
  * If the BTC benchmark or most of the universe cannot be loaded, this
  * returns 502 - rotation is NEVER computed from simulated data.
