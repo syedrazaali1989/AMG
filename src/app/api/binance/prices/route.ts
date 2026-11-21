@@ -16,8 +16,10 @@ export async function GET() {
             });
         }
 
-        // Fetch from Binance (server-side, no CORS)
-        const response = await fetch('https://api.binance.com/api/v3/ticker/price');
+        // Fetch from Binance (server-side, no CORS). Uses the public
+        // market-data domain: api.binance.com geo-blocks Vercel's US
+        // server IPs (HTTP 451), data-api.binance.vision does not.
+        const response = await fetch('https://data-api.binance.vision/api/v3/ticker/price');
 
         if (!response.ok) {
             throw new Error(`Binance API error: ${response.status}`);

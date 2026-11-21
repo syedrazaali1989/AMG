@@ -1,5 +1,7 @@
 // Binance API Integration for Real-Time Crypto Prices
 
+import { TechnicalIndicators } from './indicators';
+
 export interface BinanceTickerPrice {
     symbol: string;
     price: string;
@@ -26,7 +28,15 @@ export interface BinanceTicker24h {
 }
 
 export class BinanceAPI {
-    private static readonly BASE_URL = 'https://api.binance.com/api/v3';
+    // Spot REST base. Deliberately data-api.binance.vision, NOT
+    // api.binance.com: api.binance.com geo-blocks (HTTP 451) requests from
+    // the US IPs that Vercel serverless functions run on, which made every
+    // server-side price/kline fetch fail in production (the old client-side
+    // code worked only because the visitor's own browser fetched prices).
+    // data-api.binance.vision is Binance's official public market-data
+    // domain and serves the same spot prices/klines without that block.
+    private static readonly BASE_URL = 'https://data-api.binance.vision/api/v3';
+    private static readonly FUTURES_BASE_URL = 'https://fapi.binance.com/fapi/v1';
 
     /**
      * Get current price for a single symbol
@@ -268,6 +278,63 @@ export class BinanceAPI {
         } catch (error) {
             // Silently fall back - scalpingMarketData.ts handles this gracefully
             throw error;
+        }
+    }
+
+    /**
+     * Get 4H candle closes for a pair (oldest first). Used by the
+     * multi-timeframe confirmation filter: 250 closes cover the EMA200
+     * warmup on the 4H timeframe. The last entry is the in-progress 4H
+     * candle (its close tracks the latest price).
+     */
+    static async get4hCloses(pair: string, limit: number = 250): Promise<number[]> {
+        const symbol = this.pairToBinanceSymbol(pair);
+        const klines = await this.getKlines(symbol, '4h', limit);
+        return klines.map(kline => parseFloat(String(kline[4])));
+    }
+
+    /**
+     * Market-wide BTC regime for the regime filter: 'UP' when the latest
+     * BTCUSDT price is above its 4H EMA200, 'DOWN' when below, 'NEUTRAL'
+     * when there is not enough data. Returns undefined when live data is
+     * unavailable (the filter then does not block).
+     */
+    static async getBtcRegime(): Promise<'UP' | 'DOWN' | 'NEUTRAL' | undefined> {
+        try {
+            const closes = await this.get4hCloses('BTC/USDT', 250);
+            if (closes.length < 200) return 'NEUTRAL';
+            const ema200 = TechnicalIndicators.calculateEMA(closes, 200);
+            const price = closes[closes.length - 1];
+            return price > ema200 ? 'UP' : 'DOWN';
+        } catch (error) {
+            console.warn('BTC regime unavailable (filter neutral):', error);
+            return undefined;
+        }
+    }
+
+    /**
+     * Latest futures funding rate for a pair as a decimal fraction
+     * (0.0005 = 0.05%), from the Binance futures premiumIndex endpoint.
+     * There is no data-api.binance.vision equivalent for futures, and the
+     * endpoint may be unreachable (e.g. geo-blocked server IPs): any
+     * failure returns undefined, which the funding filter treats as
+     * neutral - it never blocks on missing data.
+     */
+    static async getFundingRate(pair: string): Promise<number | undefined> {
+        try {
+            const symbol = this.pairToBinanceSymbol(pair);
+            const response = await fetch(
+                `${this.FUTURES_BASE_URL}/premiumIndex?symbol=${symbol}`
+            );
+            if (!response.ok) {
+                throw new Error(`Binance futures API error: ${response.status}`);
+            }
+            const data = await response.json();
+            const rate = parseFloat(data.lastFundingRate);
+            return isNaN(rate) ? undefined : rate;
+        } catch (error) {
+            console.warn(`Funding rate unavailable for ${pair} (filter neutral):`, error);
+            return undefined;
         }
     }
 }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { MarketDataManager } from '@/lib/signals/marketData';
+import { BinanceAPI } from '@/lib/signals/binanceAPI';
 import { SignalGenerator } from '@/lib/signals/generator';
 import { MarketType, SignalType } from '@/lib/signals/types';
 
@@ -82,6 +83,28 @@ export async function GET(request: NextRequest) {
                 { status: 502 }
             );
         }
+
+        // Enrich each pair with the signal-quality filter context:
+        //  - closes4h:   the pair's 4H closes (multi-timeframe filter)
+        //  - btcTrend:   market-wide BTC regime vs its 4H EMA200 (fetched once)
+        //  - fundingRate: latest futures funding (FUTURE signals only)
+        // Any piece that fails to load stays undefined and its filter
+        // simply does not block - context failure never invents data and
+        // never blocks signal generation.
+        const btcTrend = await BinanceAPI.getBtcRegime();
+        await Promise.allSettled(
+            marketDataList.map(async (md) => {
+                md.btcTrend = btcTrend;
+                try {
+                    md.closes4h = await BinanceAPI.get4hCloses(md.pair, 250);
+                } catch {
+                    console.warn(`4H closes unavailable for ${md.pair} (MTF filter neutral)`);
+                }
+                if (signalType === SignalType.FUTURE) {
+                    md.fundingRate = await BinanceAPI.getFundingRate(md.pair);
+                }
+            })
+        );
 
         const signals = await SignalGenerator.generateMultipleSignals(marketDataList, signalType);
 
