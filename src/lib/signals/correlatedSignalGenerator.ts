@@ -17,8 +17,13 @@ export class CorrelatedSignalGenerator {
         includeAllCoins: boolean = true
     ): Promise<Signal[]> {
         try {
-            // Get RANDOM correlated coins (10 random from 15+ pool) for MORE variety
-            const correlatedCoins = CorrelationMatrix.getRandomCorrelatedCoins(10, 0.74);
+            // Deterministic selection: the 10 strongest BTC-correlated
+            // coins (correlation >= 0.74), highest correlation first.
+            // (This used to pick 10 coins at RANDOM on every call, so two
+            // visitors - or two refreshes - got different "signals" from
+            // the same BTC move. Server-side generation needs one shared,
+            // auditable selection.)
+            const correlatedCoins = CorrelationMatrix.getCorrelatedCoins(0.74).slice(0, 10);
 
             const signals: Signal[] = [];
 
@@ -29,7 +34,7 @@ export class CorrelatedSignalGenerator {
                 }
             }
 
-            console.log(`✅ Generated ${signals.length} random correlated signals: ${correlatedCoins.map(c => c.symbol).join(', ')}`);
+            console.log(`✅ Generated ${signals.length} correlated signals: ${correlatedCoins.map(c => c.symbol).join(', ')}`);
             return signals;
         } catch (error) {
             console.error('Correlated signal generation error:', error);
@@ -79,6 +84,11 @@ export class CorrelatedSignalGenerator {
                 MarketType.CRYPTO
             );
 
+            // Same expiry convention as the primary BTC signal (48h);
+            // TP1/TP2 are milestones, only the final TP completes it.
+            const expiresAt = new Date();
+            expiresAt.setHours(expiresAt.getHours() + 48);
+
             // Create signal
             const signal: Signal = {
                 id: `CORR_${coinData.symbol}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -98,6 +108,7 @@ export class CorrelatedSignalGenerator {
                 signalType: SignalType.FUTURE,
                 status: SignalStatus.ACTIVE,
                 timestamp: new Date(),
+                expiresAt,
                 timeframe: Timeframe.ONE_HOUR,
                 tp1Hit: false,
                 tp2Hit: false,
@@ -157,8 +168,10 @@ export class CorrelatedSignalGenerator {
         const correlationPercent = Math.round(coinData.correlation * 100);
         const strengthLabel = CorrelationMatrix.getStrengthLabel(coinData.correlation);
 
-        // Correlation-based rationale
-        rationale.push(`🔗 Following BTC whale movement (${correlationPercent}% correlation - ${strengthLabel})`);
+        // Correlation-based rationale - labelled as CORRELATED up front:
+        // this signal is derived from the BTC on-chain signal, it is not
+        // an independent whale signal for this coin.
+        rationale.push(`🏷️ CORRELATED signal - derived from the BTC on-chain signal (${correlationPercent}% correlation - ${strengthLabel}), not an independent whale signal for ${coinData.symbol}`);
 
         if (btcSignal.direction === SignalDirection.LONG) {
             rationale.push(`📈 BTC LONG signal detected - ${coinData.symbol} typically follows upward`);

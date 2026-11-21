@@ -25,6 +25,8 @@ export interface LargeTransaction {
     from: string[];
     to: string[];
     type: 'exchange_inflow' | 'exchange_outflow' | 'unknown';
+    /** Height of the confirmed block the transaction was found in. */
+    blockHeight?: number;
 }
 
 export class BlockchainInfoAPI {
@@ -47,47 +49,75 @@ export class BlockchainInfoAPI {
     ]);
 
     /**
-     * Get current BTC price in USD
+     * Get current BTC price in USD.
+     *
+     * Throws if the price cannot be fetched: a made-up fallback price
+     * would silently corrupt every USD value derived from it, so callers
+     * must surface a "live data unavailable" state instead.
      */
     static async getBTCPrice(): Promise<number> {
-        try {
-            const response = await fetch(this.BTC_PRICE_URL);
-            const data = await response.json();
-            return data.USD.last || 50000; // Fallback to 50k
-        } catch (error) {
-            console.warn('Failed to fetch BTC price, using 50k default');
-            return 50000;
+        const response = await fetch(this.BTC_PRICE_URL);
+        if (!response.ok) {
+            throw new Error(`Blockchain.info ticker failed: HTTP ${response.status}`);
         }
+        const data = await response.json();
+        const price = data?.USD?.last;
+        if (typeof price !== 'number' || !(price > 0)) {
+            throw new Error('Blockchain.info ticker returned no USD price');
+        }
+        return price;
     }
 
     /**
-     * Get recent large Bitcoin transactions
+     * Get recent large Bitcoin transactions from the most recent
+     * CONFIRMED blocks on Blockchain.info.
+     *
+     * Why blocks and not the /unconfirmed-transactions feed: that feed
+     * returns only the ~100 newest mempool transactions (a few seconds
+     * of traffic), which at typical prices contains zero transfers at or
+     * above $500K - it cannot support this analysis. A confirmed block
+     * is the complete population of ~2,000+ transactions for its ~10
+     * minutes and reliably contains dozens of large transfers. The
+     * latest block is scanned first; if it yields fewer than 10 large
+     * transfers the previous block is scanned too.
+     *
+     * Returns an empty array when the source is reachable but the
+     * scanned blocks genuinely contain no transfers at or above the
+     * threshold. THROWS when the source cannot be reached - there is
+     * deliberately no fallback data: invented "large transactions" must
+     * never be shown or scored as if real.
      */
     static async getLargeTransactions(minValueUSD: number = 500000): Promise<LargeTransaction[]> {
-        try {
-            // Get current BTC price
-            const btcPrice = await this.getBTCPrice();
-            const minBTC = minValueUSD / btcPrice;
+        // Get current BTC price
+        const btcPrice = await this.getBTCPrice();
 
-            // Get latest unconfirmed transactions
-            const response = await fetch(`${this.BASE_URL}/unconfirmed-transactions?format=json`, {
-                headers: {
-                    'Accept': 'application/json',
-                }
+        // Locate the latest confirmed block
+        const latestResponse = await fetch(`${this.BASE_URL}/latestblock?format=json`, {
+            headers: { 'Accept': 'application/json' }
+        });
+        if (!latestResponse.ok) {
+            throw new Error(`Blockchain.info latestblock failed: HTTP ${latestResponse.status}`);
+        }
+        const latest = await latestResponse.json();
+
+        const largeTransactions: LargeTransaction[] = [];
+        const seen = new Set<string>();
+        let blockHash: string | undefined = latest.hash;
+        let blocksScanned = 0;
+
+        while (blockHash && blocksScanned < 2 && (blocksScanned === 0 || largeTransactions.length < 10)) {
+            const blockResponse = await fetch(`${this.BASE_URL}/rawblock/${blockHash}?format=json`, {
+                headers: { 'Accept': 'application/json' }
             });
-
-            if (!response.ok) {
-                console.warn('Blockchain.info API failed, using fallback');
-                return this.generateFallbackData(btcPrice);
+            if (!blockResponse.ok) {
+                throw new Error(`Blockchain.info rawblock failed: HTTP ${blockResponse.status}`);
             }
+            const block = await blockResponse.json();
+            blocksScanned++;
 
-            const data = await response.json();
-            const transactions: BlockchainTransaction[] = data.txs || [];
+            for (const tx of (block.tx || []) as BlockchainTransaction[]) {
+                if (seen.has(tx.hash)) continue;
 
-            // Filter and transform large transactions
-            const largeTransactions: LargeTransaction[] = [];
-
-            for (const tx of transactions) {
                 // Calculate total value
                 const totalValue = tx.out.reduce((sum, output) => sum + output.value, 0);
                 const valueBTC = totalValue / 100000000; // Satoshi to BTC
@@ -95,6 +125,7 @@ export class BlockchainInfoAPI {
 
                 // Only include if above threshold
                 if (valueUSD < minValueUSD) continue;
+                seen.add(tx.hash);
 
                 // Extract addresses
                 const fromAddresses = tx.inputs
@@ -123,19 +154,20 @@ export class BlockchainInfoAPI {
                     valueUSD,
                     from: fromAddresses.slice(0, 3), // First 3 for display
                     to: toAddresses.slice(0, 3),
-                    type
+                    type,
+                    blockHeight: block.height
                 });
             }
 
-            console.log(`🔗 Found ${largeTransactions.length} real BTC transactions over $${minValueUSD.toLocaleString()}`);
-
-            return largeTransactions.slice(0, 50); // Top 50 for comprehensive analysis
-
-        } catch (error) {
-            console.error('Blockchain.info API error:', error);
-            const btcPrice = await this.getBTCPrice();
-            return this.generateFallbackData(btcPrice);
+            blockHash = block.prev_block;
         }
+
+        // Largest first, capped for scoring/display
+        largeTransactions.sort((a, b) => b.valueUSD - a.valueUSD);
+
+        console.log(`🔗 Found ${largeTransactions.length} real BTC transactions over $${minValueUSD.toLocaleString()} in ${blocksScanned} confirmed block(s)`);
+
+        return largeTransactions.slice(0, 50);
     }
 
     /**
@@ -143,32 +175,6 @@ export class BlockchainInfoAPI {
      */
     private static isExchangeAddress(address: string): boolean {
         return this.EXCHANGE_ADDRESSES.has(address);
-    }
-
-    /**
-     * Fallback data if API fails
-     */
-    private static generateFallbackData(btcPrice: number): LargeTransaction[] {
-        const now = Math.floor(Date.now() / 1000);
-        const transactions: LargeTransaction[] = [];
-
-        // Generate 5-10 realistic transactions
-        for (let i = 0; i < 7; i++) {
-            const btcAmount = 20 + Math.random() * 100; // 20-120 BTC
-            const isToExchange = Math.random() > 0.5;
-
-            transactions.push({
-                hash: '0x' + Array(64).fill(0).map(() => Math.floor(Math.random() * 16).toString(16)).join(''),
-                timestamp: now - (i * 300),
-                valueBTC: btcAmount,
-                valueUSD: btcAmount * btcPrice,
-                from: ['bc1q...'],
-                to: ['bc1q...'],
-                type: isToExchange ? 'exchange_inflow' : 'exchange_outflow'
-            });
-        }
-
-        return transactions;
     }
 
     /**
