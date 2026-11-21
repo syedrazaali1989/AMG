@@ -114,13 +114,12 @@ export class BinanceAPI {
             const data = await response.json();
             return data;
         } catch (error) {
-            // CORS error is expected when calling Binance from browser
-            // App automatically falls back to high-quality simulated data
-            // Only show friendly message in development, not scary errors
+            // Binance is unreachable (network/CORS/geo). There is NO simulated
+            // fallback: callers must treat this as "live data unavailable".
             if (process.env.NODE_ENV === 'development') {
-                console.info(`📊 Binance API unavailable for ${symbol} (browser CORS restriction) - using simulated data`);
+                console.info(`📊 Binance API unavailable for ${symbol}`);
             }
-            throw error; // Re-throw for fallback mechanism in marketData.ts
+            throw error;
         }
     }
 
@@ -171,6 +170,8 @@ export class BinanceAPI {
     static async getMarketDataWithRealPrices(pair: string): Promise<{
         currentPrice: number;
         prices: number[];
+        highs: number[];
+        lows: number[];
         volumes: number[];
         timestamps: Date[];
     }> {
@@ -181,15 +182,21 @@ export class BinanceAPI {
             const klines = await this.getKlines(symbol, '1h', 100);
 
             const prices: number[] = [];
+            const highs: number[] = [];
+            const lows: number[] = [];
             const volumes: number[] = [];
             const timestamps: Date[] = [];
 
             for (const kline of klines) {
                 const closePrice = parseFloat(String(kline[4])); // Close price
+                const highPrice = parseFloat(String(kline[2])); // High price
+                const lowPrice = parseFloat(String(kline[3])); // Low price
                 const volume = parseFloat(String(kline[5])); // Volume
                 const timestamp = new Date(kline[0]); // Open time
 
                 prices.push(closePrice);
+                highs.push(highPrice);
+                lows.push(lowPrice);
                 volumes.push(volume);
                 timestamps.push(timestamp);
             }
@@ -199,11 +206,13 @@ export class BinanceAPI {
             return {
                 currentPrice,
                 prices,
+                highs,
+                lows,
                 volumes,
                 timestamps
             };
         } catch (error) {
-            // Silently fall back - marketData.ts handles this gracefully
+            // No fallback: propagate so callers can show "live data unavailable"
             throw error;
         }
     }

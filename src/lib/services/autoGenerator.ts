@@ -1,6 +1,5 @@
 import { Signal, SignalType, MarketType } from '../signals/types';
 import { SignalManager } from './signalManager';
-import { SignalGenerator } from '../signals/generator';
 import { ScalpingSignalGenerator } from '../signals/scalpingGenerator';
 import { OnChainSignalGenerator } from '../signals/onChainGenerator';
 import { MarketDataManager } from '../signals/marketData';
@@ -129,32 +128,27 @@ export class AutoGenerator {
     }
 
     /**
-     * Generate standard signals
+     * Generate standard signals.
+     *
+     * Standard signals are generated SERVER-SIDE by /api/signals (one shared
+     * engine instance against live Binance data) so every visitor sees the
+     * same signals. This method only fetches them. If live data is
+     * unavailable the API returns an error and no signals are produced -
+     * there is no client-side or simulated fallback.
      */
     private static async generateStandardSignals(config: GenerationConfig): Promise<Signal[]> {
-        const allPairs = MarketDataManager.getAllPairs();
-        const filteredPairs = allPairs.filter(({ marketType }) =>
-            config.market === 'CRYPTO' ? marketType === MarketType.CRYPTO : marketType === MarketType.FOREX
-        );
-
-        const signalType = config.signalType === 'SPOT' ? SignalType.SPOT : SignalType.FUTURE;
-
-        // Generate signals for each pair
-        const signals: Signal[] = [];
-        for (const { pair, marketType } of filteredPairs) {
-            try {
-                const marketData = await MarketDataManager.generateMarketData(pair, marketType);
-                const signal = await SignalGenerator.generateSignal(marketData, signalType);
-                if (signal) {
-                    signals.push(signal);
-                }
-            } catch (error) {
-                // Continue with other pairs
-                console.debug(`Error generating signal for ${pair}:`, error);
-            }
+        if (config.market !== 'CRYPTO') {
+            console.warn('Standard auto-generation is only available for CRYPTO (live data source)');
+            return [];
         }
 
-        return signals;
+        const response = await fetch(`/api/signals?market=CRYPTO&type=${config.signalType}`);
+        if (!response.ok) {
+            throw new Error(`Live signals unavailable (status ${response.status})`);
+        }
+
+        const data = await response.json();
+        return (data.signals || []) as Signal[];
     }
 
     /**

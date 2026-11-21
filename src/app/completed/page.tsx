@@ -36,7 +36,9 @@ export default function CompletedSignalsPage() {
 
                 // Migrate and add unique keys
                 const migratedSignals = uniqueSignals.map((signal: any, index: number) => {
-                    // Migrate partial TPs if missing
+                    // Backfill missing partial-TP LEVELS for display only.
+                    // Hit flags are NEVER fabricated: a stored record's
+                    // tp1Hit/tp2Hit/tp3Hit are shown exactly as recorded.
                     if (!signal.takeProfit1 || !signal.takeProfit2 || !signal.takeProfit3) {
                         const isBuyOrLong = signal.direction === 'BUY' || signal.direction === 'LONG';
                         if (isBuyOrLong) {
@@ -49,23 +51,6 @@ export default function CompletedSignalsPage() {
                             signal.takeProfit1 = signal.entryPrice - (tpDistance * 0.30);
                             signal.takeProfit2 = signal.entryPrice - (tpDistance * 0.60);
                             signal.takeProfit3 = signal.takeProfit;
-                        }
-                        signal.tp1Hit = true;
-                        signal.tp2Hit = true;
-                        signal.tp3Hit = true;
-                    }
-
-                    // Migrate missing TP1 hit time (if TP1 was hit but no time recorded)
-                    if (signal.tp1Hit && !signal.tp1HitTime) {
-                        // Estimate TP1 time based on completion time or TP2 time
-                        if (signal.tp2HitTime) {
-                            // TP1 was hit before TP2, estimate ~30 seconds earlier
-                            const tp2Time = new Date(signal.tp2HitTime);
-                            signal.tp1HitTime = new Date(tp2Time.getTime() - 30000); // 30 seconds before TP2
-                        } else if (signal.completedAt) {
-                            // Estimate TP1 as ~1 minute before completion
-                            const completedTime = new Date(signal.completedAt);
-                            signal.tp1HitTime = new Date(completedTime.getTime() - 60000); // 1 minute before completion
                         }
                     }
 
@@ -140,7 +125,12 @@ export default function CompletedSignalsPage() {
     const profitableSignals = filteredSignals.filter(s => (s.profitLossPercentage || 0) > 0);
     const totalProfit = filteredSignals.reduce((sum, s) => sum + (s.profitLossPercentage || 0), 0);
     const avgProfit = filteredSignals.length > 0 ? totalProfit / filteredSignals.length : 0;
-    const winRate = filteredSignals.length > 0 ? (profitableSignals.length / filteredSignals.length) * 100 : 0;
+    // Honest win rate: wins are signals that reached the FULL take profit
+    // (status COMPLETED); losses are stop-loss exits (STOPPED). EXPIRED
+    // signals count as neither and are excluded from the rate.
+    const winCount = filteredSignals.filter(s => s.status === 'COMPLETED').length;
+    const lossCount = filteredSignals.filter(s => s.status === 'STOPPED').length;
+    const winRate = (winCount + lossCount) > 0 ? (winCount / (winCount + lossCount)) * 100 : 0;
 
     if (!mounted) {
         return null; // Prevent hydration mismatch
@@ -158,7 +148,7 @@ export default function CompletedSignalsPage() {
                         </div>
                         <div>
                             <h1 className="text-4xl font-bold text-gradient">Completed Signals</h1>
-                            <p className="text-muted-foreground">Signals that hit Take Profit targets</p>
+                            <p className="text-muted-foreground">Closed signals: full take-profit wins, stop-loss exits and expiries, at realised exit prices</p>
                         </div>
                     </div>
                 </motion.div>

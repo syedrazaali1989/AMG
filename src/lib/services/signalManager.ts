@@ -116,7 +116,14 @@ export class SignalManager {
     }
 
     /**
-     * Complete a signal and move to completed signals
+     * Move a closed signal (COMPLETED / STOPPED / EXPIRED) to the completed
+     * list, preserving its realised outcome.
+     *
+     * The realised P/L is taken from the signal's exit price (full TP price,
+     * SL price, or last price at expiry) as computed by the signal updater -
+     * it is NEVER recomputed from partial-TP prices or a live mark here.
+     * The signal's existing status is preserved; this method does not force
+     * COMPLETED onto stopped/expired signals.
      */
     static completeSignal(signalId: string, type: 'standard' | 'scalping' | 'onchain'): void {
         const signals = this.getActiveSignals(type);
@@ -125,29 +132,21 @@ export class SignalManager {
         if (signalIndex === -1) return;
 
         const signal = signals[signalIndex];
-        signal.status = SignalStatus.COMPLETED;
 
-        // Recalculate profit based on which TP was hit
+        // Realised profit at the actual exit price
         const isLong = signal.direction === 'LONG' || signal.direction === 'BUY';
-        let finalPrice = signal.currentPrice;
-
-        // Use TP3 price if hit, otherwise TP2 price
-        if (signal.tp3Hit && signal.takeProfit3) {
-            finalPrice = signal.takeProfit3;
-        } else if (signal.tp2Hit && signal.takeProfit2) {
-            finalPrice = signal.takeProfit2;
-        }
-
-        // Recalculate profit based on actual TP level hit
+        const exitPrice = signal.exitPrice ?? signal.currentPrice;
         const finalProfit = isLong
-            ? ((finalPrice - signal.entryPrice) / signal.entryPrice) * 100
-            : ((signal.entryPrice - finalPrice) / signal.entryPrice) * 100;
+            ? ((exitPrice - signal.entryPrice) / signal.entryPrice) * 100
+            : ((signal.entryPrice - exitPrice) / signal.entryPrice) * 100;
 
-        // Add to completed signals with corrected profit
+        // Add to completed signals with realised profit
         const completed = this.getCompletedSignals();
         completed.push({
             ...signal,
-            profitLossPercentage: finalProfit, // Use corrected profit
+            exitPrice,
+            profitLossPercentage: finalProfit, // Realised, at exit price
+            profitLoss: isLong ? exitPrice - signal.entryPrice : signal.entryPrice - exitPrice,
             completedAt: new Date().toISOString(),
             isScalping: type === 'scalping',
             isOnChain: type === 'onchain'
@@ -186,7 +185,8 @@ export class SignalManager {
                 const age = now - new Date(signal.timestamp).getTime();
                 const isOld = age > maxAge;
                 const isInactive = signal.status === SignalStatus.COMPLETED ||
-                    signal.status === SignalStatus.STOPPED;
+                    signal.status === SignalStatus.STOPPED ||
+                    signal.status === SignalStatus.EXPIRED;
                 return !(isOld && isInactive);
             });
 

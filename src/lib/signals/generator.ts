@@ -30,14 +30,22 @@ import {
 export class SignalGenerator {
     private static predictionEngineInitialized = false;
 
-    // Trading Profile Constants - Balanced Quality vs Quantity
+    // Trading Profile Constants
+    // Issuance is decided by the TECHNICAL score alone (see generateSignal).
+    // The score's own direction gate is 58 (BUY_THRESHOLD/SELL_THRESHOLD below),
+    // the raw score is capped at 100, and in backtesting over ~41 days x 24 pairs
+    // the highest score the engine ever produced was 80. The previous 70/72
+    // thresholds were applied to a sentiment-blended confidence that needed a
+    // technical score of ~83-87 with neutral sentiment - unreachable in practice,
+    // which made issuance depend on the (fabricated) news term instead.
+    // 58 aligns the profile gate with the engine's own technical gate.
     private static readonly SPOT_PROFILE = {
-        minConfidence: 70,        // SPOT: 70% minimum (balanced for quality)
+        minConfidence: 58,        // SPOT: technical score >= 58
         riskLevel: 'MODERATE' as const
     };
 
     private static readonly FUTURES_PROFILE = {
-        minConfidence: 72,        // FUTURES: 72% minimum (balanced for quality)
+        minConfidence: 58,        // FUTURES: technical score >= 58
         riskLevel: 'HIGH' as const
     };
 
@@ -229,47 +237,31 @@ export class SignalGenerator {
         // Check if this is a counter-trend signal
         const isCounterTrend = this.isCounterTrendSignal(direction, advancedAnalysis.trend);
 
-        // === ASYNC NEWS INTEGRATION ===
-        // Get real-time news impact (last 2 hours)
+        // === NEWS (DISPLAY ONLY) ===
+        // News impact and sentiment are still collected for display on the
+        // signal card, but they NO LONGER influence confidence, issuance, or
+        // TP/SL levels in any way. When no real news source is configured the
+        // values are neutral (score 0) - simulated news was removed.
         const newsImpact = await NewsAnalyzer.getNewsImpactAssessment(pair);
         const newsImpactScore = newsImpact.score; // -5 to +5
 
-        // Calculate sentiment score (news + economic events)
         const technicalScore = (direction === SignalDirection.BUY || direction === SignalDirection.LONG) ? buyScore : sellScore;
         const sentimentScore = await NewsAnalyzer.calculateSentimentScore(pair, technicalScore);
 
-        // Combine technical and fundamental analysis
-        // Technical: 60%, News: 20%, Economic: 20%
-        let finalConfidence = (technicalConfidence * 0.6) +
-            (Math.max(0, sentimentScore.news + 100) / 2 * 0.2) +
-            (Math.max(0, sentimentScore.economic + 100) / 2 * 0.2);
+        // Confidence IS the technical confidence (raw score capped at 100).
+        // Issuance below is therefore decided by technicals alone.
+        const confidence = Math.round(Math.max(0, Math.min(100, technicalConfidence)));
 
-        // Use sentiment only for confirmation, not contradiction
-        // Boost confidence when sentiment aligns with technical signal
-        if (sentimentScore.overall > 30 && (direction === SignalDirection.BUY || direction === SignalDirection.LONG)) {
-            // Bullish news confirms buy signal - boost confidence
-            finalConfidence = Math.min(finalConfidence * 1.15, 100);
-        } else if (sentimentScore.overall < -30 && (direction === SignalDirection.SELL || direction === SignalDirection.SHORT)) {
-            // Bearish news confirms sell signal - boost confidence (SAME as bullish)
-            finalConfidence = Math.min(finalConfidence * 1.15, 100);
-        } else if (Math.abs(sentimentScore.overall) > 40 &&
-            ((sentimentScore.overall > 0 && (direction === SignalDirection.SELL || direction === SignalDirection.SHORT)) ||
-                (sentimentScore.overall < 0 && (direction === SignalDirection.BUY || direction === SignalDirection.LONG)))) {
-            // Strong sentiment contradicts technical - slightly reduce confidence but don't invert
-            finalConfidence *= 0.85;
-        }
-
-        const confidence = Math.round(Math.max(0, Math.min(100, finalConfidence)));
-
-        // Counter-trend signals require higher confidence (80%)
-        if (isCounterTrend && confidence < 80) {
+        // Counter-trend signals require a stronger technical score.
+        // (Was 80 on the old sentiment-blended scale; on the pure technical
+        // scale the observed maximum is ~80, so 70 keeps a real premium over
+        // the 58 base gate without being a de-facto ban.)
+        if (isCounterTrend && confidence < 70) {
             return null; // Reject weak counter-trend signals (higher risk)
         }
 
-        // Profile-based confidence threshold
+        // Profile-based confidence threshold (technical score only)
         const profile = signalType === SignalType.SPOT ? this.SPOT_PROFILE : this.FUTURES_PROFILE;
-
-        // SPOT: 60% minimum, FUTURES: 70% minimum
         if (confidence < profile.minConfidence) {
             return null; // Signal doesn't meet quality threshold for this type
         }
@@ -329,7 +321,7 @@ export class SignalGenerator {
                     (predictionConsensus.overallDirection === 'BULLISH' && technicalBias === 'BULLISH') ||
                     (predictionConsensus.overallDirection === 'BEARISH' && technicalBias === 'BEARISH')
                 ) {
-                    // Note: finalConfidence already calculated, this is informational
+                    // Note: confidence is purely technical, this is informational only
                     console.log(`✅ Prediction consensus confirms ${technicalBias} signal (${predictionConsensus.agreement}% agreement)`);
                 }
             }
@@ -352,14 +344,12 @@ export class SignalGenerator {
         let stopLoss: number;
         let takeProfit: number;
 
-        // Calculate ATR for volatility-based targets
-        const atr = this.calculateATR(prices);
+        // Calculate ATR (true range) for volatility-based targets
+        const atr = this.calculateATR(prices, marketData.highs, marketData.lows);
 
-        // Adjust multipliers based on confidence and sentiment
+        // Multipliers depend on confidence only - sentiment never moves levels.
         // Higher confidence = wider TP, tighter SL
-        // Bullish sentiment for BUY or Bearish for SELL = wider TP
         const confidenceMultiplier = confidence / 100;
-        const sentimentAdjustment = Math.abs(sentimentScore.overall) / 100;
 
         if (direction === SignalDirection.BUY || direction === SignalDirection.LONG) {
             // For buy signals
@@ -367,21 +357,13 @@ export class SignalGenerator {
             const slMultiplier = 1.5 - (confidenceMultiplier * 0.3);
             stopLoss = entryPrice - (atr * slMultiplier);
 
-            // Take profit: INCREASED by 50% for better targets
-            let tpMultiplier = 3.5 + (confidenceMultiplier * 2.5); // Was 2.5 + 1.5, now 3.5 + 2.5
-            if (sentimentScore.overall > 30) {
-                // Bullish news supports higher TP
-                tpMultiplier += sentimentAdjustment * 2; // Was 1.5, now 2
-            }
+            // Take profit target
+            const tpMultiplier = 3.5 + (confidenceMultiplier * 2.5);
             takeProfit = entryPrice + (atr * tpMultiplier);
 
-            // Adjust based on Bollinger Bands
+            // Adjust stop based on Bollinger Bands
             if (stopLoss > bollingerBands.lower) {
                 stopLoss = bollingerBands.lower * 0.995;
-            }
-            // Set TP near upper band if very bullish
-            if (sentimentScore.overall > 50 && takeProfit < bollingerBands.upper) {
-                takeProfit = bollingerBands.upper * 0.98;
             }
         } else {
             // For sell signals
@@ -389,21 +371,13 @@ export class SignalGenerator {
             const slMultiplier = 1.5 - (confidenceMultiplier * 0.3);
             stopLoss = entryPrice + (atr * slMultiplier);
 
-            // Take profit: INCREASED by 50% for better targets
-            let tpMultiplier = 3.5 + (confidenceMultiplier * 2.5); // Was 2.5 + 1.5, now 3.5 + 2.5
-            if (sentimentScore.overall < -30) {
-                // Bearish news supports lower TP
-                tpMultiplier += sentimentAdjustment * 2; // Was 1.5, now 2
-            }
+            // Take profit target
+            const tpMultiplier = 3.5 + (confidenceMultiplier * 2.5);
             takeProfit = entryPrice - (atr * tpMultiplier);
 
-            // Adjust based on Bollinger Bands
+            // Adjust stop based on Bollinger Bands
             if (stopLoss < bollingerBands.upper) {
                 stopLoss = bollingerBands.upper * 1.005;
-            }
-            // Set TP near lower band if very bearish
-            if (sentimentScore.overall < -50 && takeProfit > bollingerBands.lower) {
-                takeProfit = bollingerBands.lower * 1.02;
             }
         }
 
@@ -573,22 +547,48 @@ export class SignalGenerator {
     }
 
     /**
-     * Calculate ATR (Average True Range) for stop loss/take profit
-     * @param prices Array of prices
+     * Calculate ATR (Average True Range) for stop loss/take profit.
+     *
+     * Uses the TRUE RANGE of each candle:
+     *   TR = max(high - low, |high - prevClose|, |low - prevClose|)
+     * The previous implementation used only |close - prevClose|, which
+     * ignores intra-candle ranges and produced noise-tight stops.
+     * When candle highs/lows are unavailable (e.g. forex feed), it falls
+     * back to the close-to-close change.
+     * @param prices Array of closing prices
+     * @param highs Optional array of candle highs (same order as prices)
+     * @param lows Optional array of candle lows (same order as prices)
      * @param period Period for ATR calculation
      * @returns ATR value
      */
-    private static calculateATR(prices: number[], period: number = 14): number {
+    private static calculateATR(
+        prices: number[],
+        highs?: number[],
+        lows?: number[],
+        period: number = 14
+    ): number {
         if (prices.length < period + 1) {
             return prices[prices.length - 1] * 0.02; // 2% fallback
         }
 
+        const hasOHLC = highs && lows && highs.length === prices.length && lows.length === prices.length;
+
         const trueRanges: number[] = [];
 
         for (let i = 1; i < prices.length; i++) {
-            const high = Math.max(prices[i], prices[i - 1]);
-            const low = Math.min(prices[i], prices[i - 1]);
-            const tr = high - low;
+            const prevClose = prices[i - 1];
+            let tr: number;
+            if (hasOHLC) {
+                const high = highs[i];
+                const low = lows[i];
+                tr = Math.max(
+                    high - low,
+                    Math.abs(high - prevClose),
+                    Math.abs(low - prevClose)
+                );
+            } else {
+                tr = Math.abs(prices[i] - prevClose);
+            }
             trueRanges.push(tr);
         }
 
@@ -656,92 +656,98 @@ export class SignalGenerator {
      * @param currentPrice Current market price
      * @returns Updated signal
      */
+    /**
+     * Update signal with current price and P/L.
+     *
+     * HONEST OUTCOME RULES:
+     * - TP1/TP2/TP3 are partial milestones only; they never close a signal.
+     * - A signal is COMPLETED (a win) only when the FULL take profit is
+     *   reached before the stop loss; realised P/L is taken at the TP price.
+     * - If the stop loss is reached first the signal is STOPPED and realised
+     *   P/L is taken at the SL price.
+     * - If neither is reached by expiry the signal is EXPIRED (never a win,
+     *   never "completed"); realised P/L is taken at the last price.
+     * While ACTIVE, profitLoss remains a live mark at the current price.
+     */
     static updateSignal(signal: Signal, currentPrice: number): Signal {
+        const isLong = signal.direction === SignalDirection.BUY || signal.direction === SignalDirection.LONG;
+
         // Track highest and lowest prices reached
         const highestPrice = Math.max(signal.highestPrice || signal.entryPrice, currentPrice);
         const lowestPrice = Math.min(signal.lowestPrice || signal.entryPrice, currentPrice);
 
-        const profitLoss = (signal.direction === SignalDirection.BUY || signal.direction === SignalDirection.LONG)
-            ? currentPrice - signal.entryPrice
-            : signal.entryPrice - currentPrice;
-
-        const profitLossPercentage = (profitLoss / signal.entryPrice) * 100;
-
-        // Check partial TP hits
+        // Check partial TP hits (milestones only)
         let tp1Hit = signal.tp1Hit || false;
         let tp2Hit = signal.tp2Hit || false;
         let tp3Hit = signal.tp3Hit || false;
+        let tp1HitTime = signal.tp1HitTime;
+        let tp2HitTime = signal.tp2HitTime;
+        let tp3HitTime = signal.tp3HitTime;
 
-        // Check if stop loss or take profit hit
         let status = signal.status;
+        let exitPrice = signal.exitPrice;
 
         // Only update status if signal is still ACTIVE
         if (status === SignalStatus.ACTIVE) {
-            if (signal.direction === SignalDirection.BUY || signal.direction === SignalDirection.LONG) {
-                // For LONG/BUY: Check partial TPs
-                if (signal.takeProfit1 && highestPrice >= signal.takeProfit1) {
-                    if (!tp1Hit) {
-                        tp1Hit = true;
-                        signal.tp1HitTime = new Date(); // Record TP1 hit time
-                    }
+            if (isLong) {
+                if (signal.takeProfit1 && highestPrice >= signal.takeProfit1 && !tp1Hit) {
+                    tp1Hit = true;
+                    tp1HitTime = new Date();
                 }
-                if (signal.takeProfit2 && highestPrice >= signal.takeProfit2) {
-                    if (!tp2Hit) {
-                        tp2Hit = true;
-                        signal.tp2HitTime = new Date(); // Record TP2 hit time
-                    }
+                if (signal.takeProfit2 && highestPrice >= signal.takeProfit2 && !tp2Hit) {
+                    tp2Hit = true;
+                    tp2HitTime = new Date();
                 }
-                if (signal.takeProfit3 && highestPrice >= signal.takeProfit3) {
-                    if (!tp3Hit) {
-                        tp3Hit = true;
-                        signal.tp3HitTime = new Date(); // Record TP3 hit time
-                    }
+                if (signal.takeProfit3 && highestPrice >= signal.takeProfit3 && !tp3Hit) {
+                    tp3Hit = true;
+                    tp3HitTime = new Date();
                 }
 
-                // Check SL and TP
+                // Stop loss is checked first: if both were touched inside the
+                // same update window the conservative (losing) outcome is kept.
                 if (lowestPrice <= signal.stopLoss) {
                     status = SignalStatus.STOPPED;
-                } else if (tp2Hit || tp3Hit) {
-                    // Complete signal when TP2 (65%) OR TP3 (85%) is hit
-                    // This provides realistic completion rates
+                    exitPrice = signal.stopLoss;
+                } else if (highestPrice >= signal.takeProfit) {
                     status = SignalStatus.COMPLETED;
+                    exitPrice = signal.takeProfit;
                 }
             } else {
-                // For SHORT/SELL: Check partial TPs
-                if (signal.takeProfit1 && lowestPrice <= signal.takeProfit1) {
-                    if (!tp1Hit) {
-                        tp1Hit = true;
-                        signal.tp1HitTime = new Date(); // Record TP1 hit time
-                    }
+                if (signal.takeProfit1 && lowestPrice <= signal.takeProfit1 && !tp1Hit) {
+                    tp1Hit = true;
+                    tp1HitTime = new Date();
                 }
-                if (signal.takeProfit2 && lowestPrice <= signal.takeProfit2) {
-                    if (!tp2Hit) {
-                        tp2Hit = true;
-                        signal.tp2HitTime = new Date(); // Record TP2 hit time
-                    }
+                if (signal.takeProfit2 && lowestPrice <= signal.takeProfit2 && !tp2Hit) {
+                    tp2Hit = true;
+                    tp2HitTime = new Date();
                 }
-                if (signal.takeProfit3 && lowestPrice <= signal.takeProfit3) {
-                    if (!tp3Hit) {
-                        tp3Hit = true;
-                        signal.tp3HitTime = new Date(); // Record TP3 hit time
-                    }
+                if (signal.takeProfit3 && lowestPrice <= signal.takeProfit3 && !tp3Hit) {
+                    tp3Hit = true;
+                    tp3HitTime = new Date();
                 }
 
-                // Check SL and TP
                 if (highestPrice >= signal.stopLoss) {
                     status = SignalStatus.STOPPED;
-                } else if (tp2Hit || tp3Hit) {
-                    // Complete signal when TP2 (65%) OR TP3 (85%) is hit
-                    // This provides realistic completion rates
+                    exitPrice = signal.stopLoss;
+                } else if (lowestPrice <= signal.takeProfit) {
                     status = SignalStatus.COMPLETED;
+                    exitPrice = signal.takeProfit;
                 }
             }
 
-            // Check expiration
-            if (signal.expiresAt && new Date() > signal.expiresAt) {
-                status = SignalStatus.COMPLETED;
+            // Expiry without TP or SL: EXPIRED, exited at the last price.
+            if (status === SignalStatus.ACTIVE && signal.expiresAt && new Date() > signal.expiresAt) {
+                status = SignalStatus.EXPIRED;
+                exitPrice = currentPrice;
             }
         }
+
+        // Realised P/L at the exit price once closed; live mark while active.
+        const effectivePrice = status === SignalStatus.ACTIVE ? currentPrice : (exitPrice ?? currentPrice);
+        const profitLoss = isLong
+            ? effectivePrice - signal.entryPrice
+            : signal.entryPrice - effectivePrice;
+        const profitLossPercentage = (profitLoss / signal.entryPrice) * 100;
 
         return {
             ...signal,
@@ -751,6 +757,10 @@ export class SignalGenerator {
             tp1Hit,
             tp2Hit,
             tp3Hit,
+            tp1HitTime,
+            tp2HitTime,
+            tp3HitTime,
+            exitPrice,
             profitLoss,
             profitLossPercentage,
             status
@@ -810,22 +820,25 @@ export class SignalGenerator {
         const activeSignals = signals.filter(s => s.status === SignalStatus.ACTIVE).length;
         const completedSignals = signals.filter(s => s.status === SignalStatus.COMPLETED);
         const stoppedSignals = signals.filter(s => s.status === SignalStatus.STOPPED);
+        const expiredSignals = signals.filter(s => s.status === SignalStatus.EXPIRED);
 
-        const successfulSignals = completedSignals.filter(s =>
-            (s.profitLossPercentage || 0) > 0
-        ).length;
+        // Honest accounting: a "success" is only a COMPLETED signal, which by
+        // construction means the FULL take profit was reached before the stop.
+        // EXPIRED signals are neither wins nor losses and are excluded from
+        // the accuracy rate.
+        const successfulSignals = completedSignals.length;
+        const failedSignals = stoppedSignals.length;
 
-        const failedSignals = stoppedSignals.length + completedSignals.filter(s =>
-            (s.profitLossPercentage || 0) <= 0
-        ).length;
-
-        const closedSignals = totalSignals - activeSignals;
-        const accuracyRate = closedSignals > 0
-            ? (successfulSignals / closedSignals) * 100
+        const resolvedSignals = successfulSignals + failedSignals;
+        const accuracyRate = resolvedSignals > 0
+            ? (successfulSignals / resolvedSignals) * 100
             : 0;
 
-        const totalProfit = signals.reduce((sum, s) => sum + (s.profitLossPercentage || 0), 0);
-        const averageProfit = totalSignals > 0 ? totalProfit / totalSignals : 0;
+        // Average profit uses realised P/L of closed signals only
+        // (COMPLETED at TP, STOPPED at SL, EXPIRED at last price).
+        const closedSignals = [...completedSignals, ...stoppedSignals, ...expiredSignals];
+        const totalProfit = closedSignals.reduce((sum, s) => sum + (s.profitLossPercentage || 0), 0);
+        const averageProfit = closedSignals.length > 0 ? totalProfit / closedSignals.length : 0;
 
         return {
             totalSignals,

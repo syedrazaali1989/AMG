@@ -1,12 +1,17 @@
-import { Signal, SignalDirection } from '../signals/types';
+import { Signal, SignalStatus } from '../signals/types';
 import { SignalManager } from './signalManager';
+import { SignalGenerator } from '../signals/generator';
 import { fetchBinancePrice } from '../utils/binancePrices';
 import { ExnessAPI } from '../signals/exnessAPI';
 
 /**
  * Signal Catch-Up Service
  * Checks all signals against current prices when page loads
- * This handles signals that may have hit TP while browser was closed
+ * This handles signals that may have hit TP while browser was closed.
+ *
+ * Outcome rules are the shared honest ones from SignalGenerator.updateSignal:
+ * a signal closes as COMPLETED only at the FULL take profit, STOPPED at the
+ * stop loss, or EXPIRED at expiry. Partial TP touches never complete it.
  */
 export class SignalCatchup {
     /**
@@ -68,61 +73,18 @@ export class SignalCatchup {
                 }
             }
 
-            // Check if TP targets hit
-            const isLong = signal.direction === SignalDirection.LONG || signal.direction === SignalDirection.BUY;
-            let shouldComplete = false;
-            let tp1Hit = signal.tp1Hit || false;
-            let tp2Hit = signal.tp2Hit || false;
-            let tp3Hit = signal.tp3Hit || false;
+            // Apply the shared outcome logic (full TP = COMPLETED, SL = STOPPED,
+            // expiry = EXPIRED, partial TPs are milestones only). Note: only the
+            // current price is available here, so this checks the current level
+            // against the targets - it does not invent intra-period highs/lows.
+            const updatedSignal = SignalGenerator.updateSignal(signal, currentPrice);
 
-            if (isLong) {
-                // LONG: Check if price went high enough
-                if (signal.takeProfit3 && currentPrice >= signal.takeProfit3) {
-                    tp1Hit = tp2Hit = tp3Hit = true;
-                    shouldComplete = true;
-                    console.log(`✅ ${signal.pair}: TP3 HIT! (${currentPrice.toFixed(8)} >= ${signal.takeProfit3.toFixed(8)})`);
-                } else if (signal.takeProfit2 && currentPrice >= signal.takeProfit2) {
-                    tp1Hit = tp2Hit = true;
-                    shouldComplete = true;
-                    console.log(`✅ ${signal.pair}: TP2 HIT! (${currentPrice.toFixed(8)} >= ${signal.takeProfit2.toFixed(8)})`);
-                } else if (signal.takeProfit1 && currentPrice >= signal.takeProfit1) {
-                    tp1Hit = true;
-                    console.log(`✅ ${signal.pair}: TP1 HIT! (${currentPrice.toFixed(8)} >= ${signal.takeProfit1.toFixed(8)})`);
-                }
-            } else {
-                // SHORT: Check if price went low enough
-                if (signal.takeProfit3 && currentPrice <= signal.takeProfit3) {
-                    tp1Hit = tp2Hit = tp3Hit = true;
-                    shouldComplete = true;
-                    console.log(`✅ ${signal.pair}: TP3 HIT! (${currentPrice.toFixed(8)} <= ${signal.takeProfit3.toFixed(8)})`);
-                } else if (signal.takeProfit2 && currentPrice <= signal.takeProfit2) {
-                    tp1Hit = tp2Hit = true;
-                    shouldComplete = true;
-                    console.log(`✅ ${signal.pair}: TP2 HIT! (${currentPrice.toFixed(8)} <= ${signal.takeProfit2.toFixed(8)})`);
-                } else if (signal.takeProfit1 && currentPrice <= signal.takeProfit1) {
-                    tp1Hit = true;
-                    console.log(`✅ ${signal.pair}: TP1 HIT! (${currentPrice.toFixed(8)} <= ${signal.takeProfit1.toFixed(8)})`);
-                }
-            }
-
-            // Update signal with new TP hits and current price
-            const updatedSignal: Signal = {
-                ...signal,
-                currentPrice,
-                tp1Hit,
-                tp2Hit,
-                tp3Hit,
-                tp1HitTime: tp1Hit && !signal.tp1HitTime ? new Date() : signal.tp1HitTime,
-                tp2HitTime: tp2Hit && !signal.tp2HitTime ? new Date() : signal.tp2HitTime,
-                tp3HitTime: tp3Hit && !signal.tp3HitTime ? new Date() : signal.tp3HitTime,
-            };
-
-            // Complete signal if TP2 or TP3 hit
-            if (shouldComplete) {
+            if (updatedSignal.status !== SignalStatus.ACTIVE) {
+                // Persist the closed state first, then move it to the record
+                SignalManager.updateSignal(updatedSignal, type);
                 SignalManager.completeSignal(signal.id, type);
-                console.log(`🎯 ${signal.pair}: Signal COMPLETED!`);
+                console.log(`🎯 ${signal.pair}: Signal closed as ${updatedSignal.status}`);
             } else {
-                // Just update the signal
                 SignalManager.updateSignal(updatedSignal, type);
             }
 
