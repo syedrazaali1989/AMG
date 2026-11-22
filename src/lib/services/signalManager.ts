@@ -10,9 +10,10 @@ export interface ActiveSignals {
     scalping: Signal[];
     onchain: Signal[];
     scalpingv2: Signal[];
+    gold: Signal[];
 }
 
-export type SignalStoreType = 'standard' | 'scalping' | 'onchain' | 'scalpingv2';
+export type SignalStoreType = 'standard' | 'scalping' | 'onchain' | 'scalpingv2' | 'gold';
 
 export interface AutoGenerationConfig {
     enabled: boolean;
@@ -54,7 +55,8 @@ export class SignalManager {
                     ...(Array.isArray(allSignals.standard) ? allSignals.standard : []),
                     ...(Array.isArray(allSignals.scalping) ? allSignals.scalping : []),
                     ...(Array.isArray(allSignals.onchain) ? allSignals.onchain : []),
-                    ...(Array.isArray(allSignals.scalpingv2) ? allSignals.scalpingv2 : [])
+                    ...(Array.isArray(allSignals.scalpingv2) ? allSignals.scalpingv2 : []),
+                    ...(Array.isArray(allSignals.gold) ? allSignals.gold : [])
                 ];
             }
 
@@ -87,7 +89,7 @@ export class SignalManager {
             const stored = localStorage.getItem(this.ACTIVE_SIGNALS_KEY);
             const allSignals: ActiveSignals = stored
                 ? JSON.parse(stored)
-                : { standard: [], scalping: [], onchain: [], scalpingv2: [] };
+                : { standard: [], scalping: [], onchain: [], scalpingv2: [], gold: [] };
 
             allSignals[type] = signals;
 
@@ -154,7 +156,8 @@ export class SignalManager {
             completedAt: new Date().toISOString(),
             isScalping: type === 'scalping',
             isOnChain: type === 'onchain',
-            isScalpingV2: type === 'scalpingv2'
+            isScalpingV2: type === 'scalpingv2',
+            isGold: type === 'gold'
         });
 
         localStorage.setItem(this.COMPLETED_SIGNALS_KEY, JSON.stringify(completed));
@@ -184,7 +187,7 @@ export class SignalManager {
         const now = Date.now();
         const maxAge = 24 * 60 * 60 * 1000; // 24 hours
 
-        ['standard', 'scalping', 'onchain', 'scalpingv2'].forEach(type => {
+        ['standard', 'scalping', 'onchain', 'scalpingv2', 'gold'].forEach(type => {
             const signals = this.getActiveSignals(type as any);
             const filtered = signals.filter(signal => {
                 const age = now - new Date(signal.timestamp).getTime();
@@ -243,7 +246,8 @@ export class SignalManager {
             standard: [],
             scalping: [],
             onchain: [],
-            scalpingv2: []
+            scalpingv2: [],
+            gold: []
         }));
     }
 
@@ -251,6 +255,11 @@ export class SignalManager {
      * Get signal type from signal object
      */
     static getSignalType(signal: Signal): SignalStoreType {
+        // Gold signals carry an explicit marker
+        if ((signal as any).isGold) {
+            return 'gold';
+        }
+
         // Scalping V2 signals carry an explicit marker
         if ((signal as any).isScalpingV2) {
             return 'scalpingv2';

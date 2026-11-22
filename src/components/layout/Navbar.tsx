@@ -43,6 +43,7 @@ export function Navbar() {
         { href: '/scalping-v2', label: 'Scalping V2 🎯' },
         { href: '/money-rotation', label: 'Money Rotation 🔄' },
         { href: '/on-chain', label: 'On-Chain 🐋' },
+        { href: '/gold', label: 'Gold 🥇' },
         { href: '/completed', label: 'Completed Signals' },
     ];
 

@@ -329,6 +329,11 @@ export interface MarketData {
   // Latest futures funding rate as a decimal fraction (0.0005 = 0.05%).
   // Undefined = unavailable, treated as neutral by the funding filter.
   fundingRate?: number;
+  // Daily candle closes for the same pair, oldest first; the last entry may
+  // be the in-progress day (its close = latest price). Used by the gold
+  // engine's daily-regime filter (goldEngineCore). Absent = filter does
+  // not block.
+  dailyCloses?: number[];
 }
 
 export interface SignalAccuracy {
