@@ -10,9 +10,13 @@ interface SignalListProps {
     signals: Signal[];
     onSignalClick?: (signal: Signal) => void;
     onFilterChange?: (filters: { marketType: MarketType | 'ALL'; signalType: SignalType | 'ALL' }) => void;
+    // When true (dashboard), each crypto card shows its price chart with
+    // Entry / SL / TP levels, and the grid widens to 2 columns on large
+    // screens so the charts stay readable.
+    showCharts?: boolean;
 }
 
-export function SignalList({ signals, onSignalClick, onFilterChange }: SignalListProps) {
+export function SignalList({ signals, onSignalClick, onFilterChange, showCharts = false }: SignalListProps) {
     const [marketFilter, setMarketFilter] = useState<MarketType | 'ALL'>('ALL');
     const [signalFilter, setSignalFilter] = useState<SignalType | 'ALL'>('ALL');
     const [searchQuery, setSearchQuery] = useState('');
@@ -97,13 +101,16 @@ export function SignalList({ signals, onSignalClick, onFilterChange }: SignalLis
                     </div>
                 </div>
             ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className={showCharts
+                    ? "grid grid-cols-1 lg:grid-cols-2 gap-4"
+                    : "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"}>
                     <AnimatePresence mode="popLayout">
                         {filteredSignals.map((signal) => (
                             <SignalCard
                                 key={signal.id}
                                 signal={signal}
                                 onClick={() => onSignalClick?.(signal)}
+                                showChart={showCharts}
                             />
                         ))}
                     </AnimatePresence>
