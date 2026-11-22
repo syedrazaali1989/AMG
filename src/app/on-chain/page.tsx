@@ -181,7 +181,8 @@ export default function OnChainPage() {
                         correlation and are labelled CORRELATED - they are not independent whale signals.
                         Trades complete only at the final target (TP3); TP1/TP2 are milestones, and unfilled
                         setups expire after 48 hours. If a live source is unavailable, no signals are shown -
-                        transactions and signals are never simulated.
+                        transactions and signals are never simulated. Each signal card shows its 1H price chart
+                        with the entry, stop loss and TP1–TP3 levels marked on it.
                     </p>
                 </div>
 
@@ -258,7 +259,7 @@ export default function OnChainPage() {
                     </div>
                 ) : (
                     <div className="mb-8">
-                        <SignalList signals={signals} />
+                        <SignalList signals={signals} showCharts />
                     </div>
                 )}
 

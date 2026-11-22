@@ -201,7 +201,7 @@ export default function ScalpingPage() {
                             Quick Scalping Signals
                         </h1>
                         <p className="text-muted-foreground mb-8">
-                            Fast trading • 15-60 minute targets • 1-3% profits
+                            Fast trading • 15-60 minute targets • 1-3% profits. Each signal card shows its 1H price chart with the entry, stop loss and TP1–TP3 levels marked on it.
                         </p>
 
                         <div className="grid grid-cols-2 gap-6">
@@ -361,7 +361,7 @@ export default function ScalpingPage() {
                                 <p className="text-muted-foreground">Generating scalping signals...</p>
                             </div>
                         ) : (
-                            <SignalList signals={filteredSignals} />
+                            <SignalList signals={filteredSignals} showCharts />
                         )}
                     </>
                 )}
