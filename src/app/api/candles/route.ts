@@ -23,6 +23,12 @@ export const dynamic = 'force-dynamic';
 const ALLOWED_INTERVALS = new Set(['1m', '5m', '15m', '1h', '4h', '1d']);
 const PAIR_PATTERN = /^[A-Za-z0-9]{2,15}\/[A-Za-z0-9]{2,15}$/;
 
+// The Gold page's signals carry the display pair 'XAU/USD (PAXG)' so the
+// underlying instrument is never hidden from visitors; their candles are
+// the real PAXG/USDT candles from Binance spot.
+const GOLD_DISPLAY_PAIR = 'XAU/USD (PAXG)';
+const GOLD_DATA_PAIR = 'PAXG/USDT';
+
 // Short server-side cache so a page full of signal cards (and concurrent
 // visitors) share one upstream fetch per pair (mirrors /api/signals).
 const CACHE_DURATION = 60 * 1000; // 60 seconds
@@ -42,13 +48,14 @@ export async function GET(request: NextRequest) {
     try {
         const { searchParams } = new URL(request.url);
         const pair = (searchParams.get('pair') || '').toUpperCase();
+        const dataPair = pair === GOLD_DISPLAY_PAIR ? GOLD_DATA_PAIR : pair;
         const interval = (searchParams.get('interval') || '1h').toLowerCase();
         const limitParam = parseInt(searchParams.get('limit') || '100', 10);
         const limit = Number.isFinite(limitParam)
             ? Math.min(500, Math.max(10, limitParam))
             : 100;
 
-        if (!PAIR_PATTERN.test(pair)) {
+        if (!PAIR_PATTERN.test(dataPair)) {
             return NextResponse.json(
                 { error: 'A valid pair (e.g. BTC/USDT) is required' },
                 { status: 400 }
@@ -61,7 +68,7 @@ export async function GET(request: NextRequest) {
             );
         }
 
-        const cacheKey = `${pair}|${interval}|${limit}`;
+        const cacheKey = `${dataPair}|${interval}|${limit}`;
         const now = Date.now();
         const cached = candleCache.get(cacheKey);
         if (cached && now - cached.timestamp < CACHE_DURATION) {
@@ -74,7 +81,7 @@ export async function GET(request: NextRequest) {
         }
 
         // Throws when live data is unavailable - there is no fallback.
-        const raw = await BinanceAPI.getCandles(pair, interval, limit);
+        const raw = await BinanceAPI.getCandles(dataPair, interval, limit);
         const candles: CandlePoint[] = raw.map(c => ({
             time: Math.floor(c.timestamp / 1000),
             open: c.open,

@@ -20,7 +20,7 @@ export class SignalCatchup {
     static async catchupAllSignals(): Promise<void> {
         console.log('🔄 Catching up on signals...');
 
-        const types: SignalStoreType[] = ['standard', 'scalping', 'onchain', 'scalpingv2'];
+        const types: SignalStoreType[] = ['standard', 'scalping', 'onchain', 'scalpingv2', 'gold'];
 
         for (const type of types) {
             await this.catchupSignalsOfType(type);
