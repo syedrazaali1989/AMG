@@ -366,7 +366,7 @@ return (
                 <div className="flex flex-col gap-6">
                     <div>
                         <h1 className="text-4xl font-bold text-gradient mb-2">Standard Trading Signals</h1>
-                        <p className="text-muted-foreground">Medium-term opportunities from live market data</p>
+                        <p className="text-muted-foreground">Medium-term opportunities from live market data. Each signal card shows its 1H price chart with the entry, stop loss and TP1–TP3 levels marked on it.</p>
                     </div>
 
                     {/* Step 1: Select Market Type */}
@@ -597,7 +597,7 @@ return (
                             </div>
                         </div>
                     ) : (
-                        <SignalList signals={filteredSignals} />
+                        <SignalList signals={filteredSignals} showCharts />
                     )}
                 </>
             )}

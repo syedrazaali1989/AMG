@@ -1,6 +1,6 @@
 'use client';
 
-import { Signal, SignalDirection, SignalStatus } from '@/lib/signals/types';
+import { Signal, MarketType, SignalDirection, SignalStatus } from '@/lib/signals/types';
 import { formatPrice, formatPercentage, formatTimeAgo, cn } from '@/lib/utils';
 import { TrendingUp, TrendingDown, Clock, Target, Shield, DollarSign } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -9,13 +9,17 @@ import { MarketAnalysisDisplay } from './MarketAnalysisDisplay';
 import { PredictionDisplay } from './PredictionDisplay';
 import { PatternDisplay } from './PatternDisplay';
 import { TimeframeDisplay } from './TimeframeDisplay';
+import { SignalChart } from './SignalChart';
 
 interface SignalCardProps {
     signal: Signal;
     onClick?: () => void;
+    // When true (dashboard), crypto cards include a candlestick chart with
+    // the signal's Entry / SL / TP1 / TP2 / TP3 levels drawn as price lines.
+    showChart?: boolean;
 }
 
-export function SignalCard({ signal, onClick }: SignalCardProps) {
+export function SignalCard({ signal, onClick, showChart = false }: SignalCardProps) {
     const isBuy = signal.direction === SignalDirection.BUY || signal.direction === SignalDirection.LONG;
     const isActive = signal.status === SignalStatus.ACTIVE;
     const isProfit = (signal.profitLossPercentage || 0) > 0;
@@ -185,6 +189,13 @@ export function SignalCard({ signal, onClick }: SignalCardProps) {
                     </div>
                 </div>
             </div>
+
+            {/* Price Chart with Entry / SL / TP levels (dashboard, crypto only) */}
+            {showChart && signal.marketType === MarketType.CRYPTO && (
+                <div className="mb-3">
+                    <SignalChart signal={signal} />
+                </div>
+            )}
 
             {/* Confidence Score */}
             <div className="mb-3">
