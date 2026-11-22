@@ -135,45 +135,6 @@ export default function GoldPage() {
         <div className="min-h-screen bg-background">
             <Navbar />
             <div className="container mx-auto px-4 py-8">
-                {/* Header */}
-                <div className="flex items-center justify-center mb-6">
-                    <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-full px-6 py-3 flex items-center gap-3">
-                        <Coins className="w-5 h-5 text-yellow-400" />
-                        <span className="text-yellow-300 font-bold text-lg">GOLD</span>
-                        <span className="text-sm text-muted-foreground">XAU/USD via PAXG • 1H engine</span>
-                    </div>
-                </div>
-
-                <div className="max-w-3xl mx-auto text-center mb-8">
-                    <h1 className="text-4xl font-bold mb-4 bg-gradient-primary bg-clip-text text-transparent">
-                        Gold Trading Signals
-                    </h1>
-                    <p className="text-muted-foreground">
-                        Generated server-side from live Binance candles (refreshed every minute) - the same
-                        signal for every visitor. Prices come from <b>PAXG</b>, Paxos-issued tokenised gold
-                        (1 PAXG = 1 troy ounce of gold) traded on Binance spot: Binance does not list a direct
-                        XAU/USD pair, so PAXG is the real gold price this engine runs on, and every signal
-                        card names it. The engine scores the hourly chart and issues at most one signal at a
-                        time, only during London and New York trading hours (07:00–21:00 UTC), and only
-                        when its score reaches 52 and both the 4H trend and the daily trend
-                        (price vs the daily EMA200) agree with the direction. TP1, TP2 and TP3 are milestones
-                        only - a trade counts as completed only when the full take profit is reached before
-                        the stop loss; setups expire after 72 hours. If live data is unavailable, no signals
-                        are shown - signals are never generated from simulated prices. Each signal card shows
-                        its 1H price chart with the entry, stop loss and TP1–TP3 levels marked on it.
-                    </p>
-                    <p className="text-muted-foreground mt-4">
-                        <b>Please read this before using these signals:</b> this is a new engine, added
-                        recently. It was backtested on PAXG hourly data from 2023 to 2026 before being added.
-                        The configuration now running - signals issued only during London and New York
-                        hours (07:00–21:00 UTC), with a 72-hour signal lifetime - finished the final segment
-                        of that test with a positive result, but on a small sample: 53 completed trades.
-                        The result is <b>not statistically proven</b>: a sample that size is too small to
-                        rule out luck. No track record on live markets exists yet.
-                        Treat these signals as unproven and size any trade accordingly.
-                    </p>
-                </div>
-
                 {/* Stats */}
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
                     <StatsCard title="Active Signals" value={stats.active} icon={Activity} />

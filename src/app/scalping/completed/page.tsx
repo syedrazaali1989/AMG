@@ -105,23 +105,6 @@ export default function ScalpingCompletedPage() {
             <Navbar />
 
             <div className="container mx-auto px-4 py-8">
-                {/* Header */}
-                <motion.div
-                    initial={{ opacity: 0, y: -20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="mb-8"
-                >
-                    <div className="flex items-center gap-3 mb-2">
-                        <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/30">
-                            <Zap className="w-8 h-8 text-green-500" />
-                        </div>
-                        <div>
-                            <h1 className="text-4xl font-bold text-gradient">Scalping Completed Signals</h1>
-                            <p className="text-muted-foreground">Quick profit targets achieved</p>
-                        </div>
-                    </div>
-                </motion.div>
-
                 {/* Statistics */}
                 {completedSignals.length > 0 && (
                     <motion.div
