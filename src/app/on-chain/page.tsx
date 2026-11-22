@@ -158,34 +158,6 @@ export default function OnChainPage() {
         <div className="min-h-screen bg-background">
             <Navbar />
             <div className="container mx-auto px-4 py-8">
-                {/* Header */}
-                <div className="flex items-center justify-center mb-6">
-                    <div className="bg-blue-500/10 border border-blue-500/30 rounded-full px-6 py-3 flex items-center gap-3">
-                        <Waves className="w-5 h-5 text-blue-500 animate-pulse" />
-                        <span className="text-blue-500 font-bold text-lg">ON-CHAIN ANALYSIS</span>
-                        <span className="text-sm text-muted-foreground">Large BTC Transfers • Technical Indicators</span>
-                    </div>
-                </div>
-
-                <div className="max-w-3xl mx-auto text-center mb-8">
-                    <h1 className="text-4xl font-bold mb-4 bg-gradient-primary bg-clip-text text-transparent">
-                        On-Chain + Technical Signals
-                    </h1>
-                    <p className="text-muted-foreground">
-                        Generated server-side from the most recent confirmed Bitcoin blocks (via
-                        Blockchain.info) and live Binance
-                        prices - the same signals for every visitor. Large BTC transfers (&ge; $500K) are
-                        scored for exchange inflow (selling pressure) vs outflow (accumulation) and combined
-                        50/50 with a technical RSI/MACD score; a BTC signal is issued only when the combined
-                        score reaches &plusmn;10. Altcoin signals are derived from the BTC signal by historical
-                        correlation and are labelled CORRELATED - they are not independent whale signals.
-                        Trades complete only at the final target (TP3); TP1/TP2 are milestones, and unfilled
-                        setups expire after 48 hours. If a live source is unavailable, no signals are shown -
-                        transactions and signals are never simulated. Each signal card shows its 1H price chart
-                        with the entry, stop loss and TP1–TP3 levels marked on it.
-                    </p>
-                </div>
-
                 {/* Stats */}
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
                     <StatsCard title="Active Signals" value={stats.active} icon={Activity} />

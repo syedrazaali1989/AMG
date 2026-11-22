@@ -128,31 +128,6 @@ export default function ScalpingV2Page() {
         <div className="min-h-screen bg-background">
             <Navbar />
             <div className="container mx-auto px-4 py-8">
-                {/* Header */}
-                <div className="flex items-center justify-center mb-6">
-                    <div className="bg-purple-500/10 border border-purple-500/30 rounded-full px-6 py-3 flex items-center gap-3">
-                        <Crosshair className="w-5 h-5 text-purple-400" />
-                        <span className="text-purple-300 font-bold text-lg">SCALPING V2</span>
-                        <span className="text-sm text-muted-foreground">ICT • Smart Money Concepts • 5m bias / 1m entry</span>
-                    </div>
-                </div>
-
-                <div className="max-w-3xl mx-auto text-center mb-8">
-                    <h1 className="text-4xl font-bold mb-4 bg-gradient-primary bg-clip-text text-transparent">
-                        ICT Scalping Signals
-                    </h1>
-                    <p className="text-muted-foreground">
-                        Generated server-side from live Binance candles (54-pair scan, refreshed every minute) -
-                        the same signals for every visitor. A signal is issued only at grade A+ (score &ge; 75)
-                        or ELITE (score &ge; 88). Targets are a real R ladder: TP1 = 1.5R, TP2 = 3R, final
-                        TP3 = 5R (or the swing extreme). TP1/TP2 touches are milestones only - a trade counts
-                        as completed only when the final target is reached before the stop loss; setups
-                        expire after 4 hours. If live data is unavailable, no signals are shown - signals
-                        are never generated from simulated candles. Each signal card shows its 1H price chart
-                        with the entry, stop loss and TP1–TP3 levels marked on it.
-                    </p>
-                </div>
-
                 {/* Stats */}
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
                     <StatsCard title="Active Signals" value={stats.active} icon={Activity} />

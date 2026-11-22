@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Navbar } from '@/components/layout/Navbar';
 import { StatsCard } from '@/components/ui/StatsCard';
 import { MoneyRotationResult } from '@/lib/signals/moneyRotation';
-import { TrendingUp, TrendingDown, Activity, RefreshCw, Repeat, DollarSign } from 'lucide-react';
+import { TrendingUp, TrendingDown, Activity, RefreshCw, DollarSign } from 'lucide-react';
 
 type ApiPayload = MoneyRotationResult & { cached: boolean };
 
@@ -55,31 +55,6 @@ export default function MoneyRotationPage() {
         <div className="min-h-screen bg-background">
             <Navbar />
             <div className="container mx-auto px-4 py-8">
-                {/* Header */}
-                <div className="flex items-center justify-center mb-6">
-                    <div className="bg-blue-500/10 border border-blue-500/30 rounded-full px-6 py-3 flex items-center gap-3">
-                        <Repeat className="w-5 h-5 text-blue-400" />
-                        <span className="text-blue-300 font-bold text-lg">MONEY ROTATION</span>
-                        <span className="text-sm text-muted-foreground">Where the traded money is moving, measured live</span>
-                    </div>
-                </div>
-
-                <div className="max-w-3xl mx-auto text-center mb-8">
-                    <h1 className="text-4xl font-bold mb-4 bg-gradient-primary bg-clip-text text-transparent">
-                        Money Rotation
-                    </h1>
-                    <p className="text-muted-foreground">
-                        For every pair in the 54-pair universe, two quantities are computed from live Binance
-                        1h candles: (1) its <b>quote-volume share</b> of the universe&apos;s traded USDT volume -
-                        last 24h vs the 24h before - and (2) its <b>relative strength vs BTC</b> over 1h / 4h /
-                        24h. Rotation score = clamp(50 + 1.5 x share momentum + 2.5 x RS composite, 0, 100),
-                        where RS composite = 0.5 x RS24h + 0.3 x RS4h + 0.2 x RS1h. A pair is ROTATING IN when
-                        its share momentum is &ge; +5% and it outperforms BTC; ROTATING OUT when share momentum
-                        is &le; -5% and it underperforms. Every number below is
-                        the actual computed value - check them against any exchange.
-                    </p>
-                </div>
-
                 {/* Signals disabled notice */}
                 <div className="max-w-3xl mx-auto mb-8">
                     <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg px-6 py-4 text-center">

@@ -364,11 +364,6 @@ return (
         <div className="container mx-auto px-4 py-8">
             <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="mb-8">
                 <div className="flex flex-col gap-6">
-                    <div>
-                        <h1 className="text-4xl font-bold text-gradient mb-2">Standard Trading Signals</h1>
-                        <p className="text-muted-foreground">Medium-term opportunities from live market data. Each signal card shows its 1H price chart with the entry, stop loss and TP1–TP3 levels marked on it.</p>
-                    </div>
-
                     {/* Step 1: Select Market Type */}
                     <div>
                         <p className="text-sm text-muted-foreground mb-2">Step 1: Market</p>

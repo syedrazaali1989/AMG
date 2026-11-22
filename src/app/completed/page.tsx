@@ -141,18 +141,6 @@ export default function CompletedSignalsPage() {
             <Navbar />
 
             <div className="container mx-auto px-4 py-8">
-                <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="mb-8">
-                    <div className="flex items-center gap-3 mb-2">
-                        <div className="p-3 rounded-xl bg-gradient-primary">
-                            <Trophy className="w-8 h-8 text-white" />
-                        </div>
-                        <div>
-                            <h1 className="text-4xl font-bold text-gradient">Completed Signals</h1>
-                            <p className="text-muted-foreground">Closed signals: full take-profit wins, stop-loss exits and expiries, at realised exit prices</p>
-                        </div>
-                    </div>
-                </motion.div>
-
                 {/* Stats Cards */}
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
                     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="glass rounded-lg p-4">
