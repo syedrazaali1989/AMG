@@ -148,7 +148,8 @@ export default function ScalpingV2Page() {
                         TP3 = 5R (or the swing extreme). TP1/TP2 touches are milestones only - a trade counts
                         as completed only when the final target is reached before the stop loss; setups
                         expire after 4 hours. If live data is unavailable, no signals are shown - signals
-                        are never generated from simulated candles.
+                        are never generated from simulated candles. Each signal card shows its 1H price chart
+                        with the entry, stop loss and TP1–TP3 levels marked on it.
                     </p>
                 </div>
 
@@ -228,7 +229,7 @@ export default function ScalpingV2Page() {
                     </div>
                 ) : (
                     <div className="mb-8">
-                        <SignalList signals={signals} />
+                        <SignalList signals={signals} showCharts />
                     </div>
                 )}
 

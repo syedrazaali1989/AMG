@@ -165,14 +165,14 @@ export default function ScalpingCompletedPage() {
                         {Object.entries(groupedByDate).map(([date, signals]: [string, any]) => (
                             <div key={date}>
                                 <h3 className="text-lg font-semibold mb-4 text-primary/70">{date}</h3>
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                                     {signals.map((signal: any) => (
                                         <motion.div
                                             key={signal.uniqueKey}
                                             initial={{ opacity: 0, y: 20 }}
                                             animate={{ opacity: 1, y: 0 }}
                                         >
-                                            <SignalCard signal={signal} />
+                                            <SignalCard signal={signal} showChart />
                                         </motion.div>
                                     ))}
                                 </div>
