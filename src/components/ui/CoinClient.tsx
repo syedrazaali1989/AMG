@@ -16,6 +16,10 @@ import { formatPrice, formatPercentage } from '@/lib/utils';
  *   dashboard and Scalping V2 pages use (/api/signals,
  *   /api/scalping-v2/signals), rendered with the shared SignalList
  *   (charts off - the page chart above already shows the levels).
+ *   The payloads are re-fetched every 60 seconds, so a signal the
+ *   engines issue while the page is open appears without a manual
+ *   refresh. Refresh ticks are silent: no loading state is shown
+ *   again, and a failed tick keeps the data already on screen.
  * - This visitor's completed signals for the pair, from the same
  *   browser-local history store the /completed pages read. There is no
  *   server-side history; nothing is fabricated.
@@ -48,37 +52,52 @@ export function CoinClient({ pair }: CoinClientProps) {
 
     useEffect(() => {
         let cancelled = false;
+        let loadedOnce = false;
         const encoded = encodeURIComponent(pair);
 
-        Promise.allSettled([
-            fetch(`/api/signals?market=CRYPTO&pairs=${encoded}`).then(r => {
-                if (!r.ok) throw new Error(`signals ${r.status}`);
-                return r.json();
-            }),
-            fetch(`/api/scalping-v2/signals?pairs=${encoded}`).then(r => {
-                if (!r.ok) throw new Error(`scalping-v2 ${r.status}`);
-                return r.json();
-            })
-        ]).then(results => {
-            if (cancelled) return;
-            const merged: Signal[] = [];
-            let anyOk = false;
-            for (const result of results) {
-                if (result.status === 'fulfilled' && Array.isArray(result.value?.signals)) {
-                    anyOk = true;
-                    merged.push(...result.value.signals);
+        const loadSignals = () => {
+            Promise.allSettled([
+                fetch(`/api/signals?market=CRYPTO&pairs=${encoded}`).then(r => {
+                    if (!r.ok) throw new Error(`signals ${r.status}`);
+                    return r.json();
+                }),
+                fetch(`/api/scalping-v2/signals?pairs=${encoded}`).then(r => {
+                    if (!r.ok) throw new Error(`scalping-v2 ${r.status}`);
+                    return r.json();
+                })
+            ]).then(results => {
+                if (cancelled) return;
+                const merged: Signal[] = [];
+                let anyOk = false;
+                for (const result of results) {
+                    if (result.status === 'fulfilled' && Array.isArray(result.value?.signals)) {
+                        anyOk = true;
+                        merged.push(...result.value.signals);
+                    }
                 }
-            }
-            setSignals(merged.filter(s => s.pair === pair && s.status === 'ACTIVE'));
-            setSignalsFailed(!anyOk);
-            setSignalsLoaded(true);
-        });
+                if (anyOk) {
+                    loadedOnce = true;
+                    setSignals(merged.filter(s => s.pair === pair && s.status === 'ACTIVE'));
+                    setSignalsFailed(false);
+                    setSignalsLoaded(true);
+                } else if (!loadedOnce) {
+                    // Only the first load may surface the failure state;
+                    // a failed refresh tick keeps what is on screen.
+                    setSignalsFailed(true);
+                    setSignalsLoaded(true);
+                }
+            });
+        };
+
+        loadSignals();
+        const interval = setInterval(loadSignals, 60_000);
 
         const completed = SignalManager.getCompletedSignals() as CompletedRecord[];
         setHistory(completed.filter(c => c.pair === pair).slice(-20).reverse());
 
         return () => {
             cancelled = true;
+            clearInterval(interval);
         };
     }, [pair]);
 

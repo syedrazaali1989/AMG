@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { Navbar } from '@/components/layout/Navbar';
 import { CoinClient } from '@/components/ui/CoinClient';
+import { CoinLivePrice } from '@/components/ui/CoinLivePrice';
 import { findCoin, getCoinMarketData, formatCoinPrice } from '@/lib/signals/coinData';
 import { formatPercentage, formatVolume } from '@/lib/utils';
 
@@ -70,9 +71,7 @@ export default async function CoinPage({ params }: CoinPageProps) {
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6 mb-8">
                             <div className="glass rounded-lg p-6 border border-border">
                                 <p className="text-sm text-muted-foreground mb-1">Price</p>
-                                <p className="text-2xl md:text-3xl font-bold text-gradient">
-                                    ${formatCoinPrice(result.data.price)}
-                                </p>
+                                <CoinLivePrice symbol={coin.symbol} initialPrice={result.data.price} />
                                 <p
                                     className={`text-sm font-semibold mt-1 ${
                                         result.data.changePct24h >= 0 ? 'text-green-500' : 'text-red-500'
