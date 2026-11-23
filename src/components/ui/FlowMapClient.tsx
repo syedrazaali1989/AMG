@@ -20,7 +20,8 @@ import type { FlowAsset, FlowMapData } from '@/lib/signals/flowMap';
  * ~/workspace/wz-research/flowmap-animation-notes.md): edges are a
  * topological chain, not a timed sequence. Sinks (z >= +1.5) receive
  * a gently curved, gradient ribbon from every source (z <= -0.3)
- * below them and from every weaker sink, so money reads as flowing
+ * below them, and each weaker sink links onward only to the single
+ * strongest sink, so money reads as flowing
  * loser -> intermediate gainer -> biggest gainer. Small white dots
  * stream along EVERY edge simultaneously at a slow ambient drift,
  * looping seamlessly; nodes themselves never pulse or flash - they
@@ -313,10 +314,10 @@ interface FlowEdge {
  * (flowmap-animation-notes.md §5): the chain is topological, not
  * timed. Sinks are assets with z >= +1.5; sources are assets with
  * z <= -0.3. Every source links to every sink stronger than it, and
- * every weaker sink links onward to every stronger sink - which is
- * what builds the multi-hop chain (Gold -> Bonds -> Stablecoins)
- * when two sinks exist, and leaves only direct edges when there is
- * just one sink. Assets between -0.3 and +1.5 get no edges, the Fed
+ * every weaker sink links onward ONLY to the single strongest sink -
+ * which is what builds the multi-hop fan (Gold -> Bonds ->
+ * Stablecoins) when two sinks exist, and leaves only direct edges
+ * when there is just one sink. Assets between -0.3 and +1.5 get no edges, the Fed
  * never has any, and with no sinks or no sources there are no edges
  * at all. Only assets placed on the map take part.
  */
@@ -342,10 +343,13 @@ function computeFlowEdges(assets: FlowAsset[]): FlowEdge[] {
             if (sink.zScore > source.zScore) push(source, sink);
         }
     }
+    // Onward links form a fan, not a mesh: each weaker sink links
+    // ONLY to the single strongest sink, so all onward lines converge
+    // on the biggest gainer (his Bonds -> Stablecoins when two sinks
+    // exist) instead of webbing every gainer to every other gainer.
+    const strongest = sinks.reduce((a, b) => (b.zScore > a.zScore ? b : a));
     for (const weaker of sinks) {
-        for (const stronger of sinks) {
-            if (stronger.zScore > weaker.zScore) push(weaker, stronger);
-        }
+        if (strongest.zScore > weaker.zScore) push(weaker, strongest);
     }
     return edges;
 }
@@ -596,7 +600,7 @@ function MapEdges({ edges }: { edges: FlowEdge[] }) {
                             d={d}
                             fill="none"
                             stroke={grad}
-                            strokeOpacity="0.5"
+                            strokeOpacity="0.38"
                             strokeWidth="3"
                             vectorEffect="non-scaling-stroke"
                             className="flowmap-edge"
