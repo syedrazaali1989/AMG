@@ -5,13 +5,15 @@ import type { CSSProperties } from 'react';
 import type { FlowAsset, FlowMapData } from '@/lib/signals/flowMap';
 
 /**
- * FlowMapClient - the Money Flow Map display, styled as a living node
- * map: risk assets clustered on the left of one dark panel, safety
- * assets on the right, the Fed as a distinct gold node, a right-hand
- * panel with the risk meter / VIX / DXY / Fed countdown / "what the
- * flow says", a plain-language summary panel under the map (English,
- * then Roman Urdu - wording the user explicitly ordered for
- * first-time readers), and a scrolling ticker along the bottom.
+ * FlowMapClient - the Money Flow Map display, rebuilt to match
+ * Waqar Zaka's map screenshot-for-screenshot: glossy dark spheres at
+ * his fixed scatter positions in one near-black panel (ticker inside
+ * each sphere, name + sigma + % in a label below it), the Fed dead
+ * centre, a right-hand panel with his semicircular risk gauge / VIX /
+ * DXY mini boxes / Fed countdown / "what the flow says", a
+ * plain-language summary panel under the map (English, then Roman
+ * Urdu - wording the user explicitly ordered for first-time
+ * readers), and a scrolling ticker along the bottom.
  *
  * The line system reproduces Waqar Zaka's MONEY FLOW MAP as measured
  * frame-by-frame from his videos (see
@@ -67,25 +69,28 @@ function formatSignedPct(value: number): string {
 }
 
 // ---------------------------------------------------------------------------
-// Node map geometry (desktop). Positions are % of the map panel:
-// risk assets left/centre, safety assets right, the Fed bottom-centre.
-// VIX is not a node - it is a gauge and lives in the side panel.
+// Node map geometry (desktop). Positions are % of the map panel and
+// reproduce his fixed scatter exactly as measured from the reference
+// frames - the same layout on both days he showed the map, only the
+// values and lines change. His 12th node (Anthropic) has no
+// counterpart in our data, so that slot stays empty. VIX is not a
+// node - it is a gauge and lives in the side panel.
 // ---------------------------------------------------------------------------
 
 const NODE_POSITIONS: Record<string, { x: number; y: number }> = {
-    spx: { x: 13, y: 24 },
-    nasdaq: { x: 29, y: 13 },
-    btc: { x: 23, y: 47 },
-    eth: { x: 41, y: 35 },
-    crude: { x: 11, y: 69 },
-    silver: { x: 33, y: 72 },
-    gold: { x: 71, y: 19 },
-    bonds: { x: 87, y: 37 },
-    dollar: { x: 67, y: 50 },
-    stablecoins: { x: 84, y: 72 }
+    gold: { x: 8, y: 36 },
+    silver: { x: 8, y: 60 },
+    bonds: { x: 21, y: 29 },
+    crude: { x: 16, y: 68 },
+    stablecoins: { x: 29, y: 84 },
+    dollar: { x: 43, y: 26 },
+    nasdaq: { x: 58, y: 29 },
+    spx: { x: 68, y: 50 },
+    btc: { x: 61, y: 70 },
+    eth: { x: 47, y: 80 }
 };
 
-const FED_POSITION = { x: 52, y: 86 };
+const FED_POSITION = { x: 34, y: 53 };
 
 const GREEN = '#22c55e';
 const RED = '#ef4444';
@@ -101,67 +106,121 @@ function zColor(z: number): string {
 const LABEL_CLASS =
     'text-[10px] font-semibold uppercase tracking-[0.22em] text-muted-foreground';
 
-function directionColor(asset: FlowAsset): string {
-    const change = asset.changePct ?? asset.zScore ?? 0;
-    return change >= 0 ? GREEN : RED;
+/** Short tickers shown inside the spheres, exactly as on his map. */
+const TICKERS: Record<string, string> = {
+    gold: 'GOLD',
+    silver: 'SILVER',
+    bonds: 'BONDS',
+    crude: 'OIL',
+    stablecoins: 'STABLE',
+    dollar: 'USD',
+    nasdaq: 'NDX',
+    spx: 'SPX',
+    btc: 'BTC',
+    eth: 'ETH'
+};
+
+const FLAT_GREY = '#a8b0bc';
+
+/**
+ * Ring / glow colour of a sphere, by z-score as on his map: green
+ * gaining, red losing, plain grey-white when ~flat (|z| < 0.25 -
+ * his USD at -0.2σ wears a grey ring and carries no lines).
+ */
+function nodeColor(z: number): string {
+    if (z >= 0.25) return GREEN;
+    if (z <= -0.25) return RED;
+    return FLAT_GREY;
 }
 
-/** Node diameter grows with |z-score|: 86px up to ~122px at 4σ+. */
-function nodeSize(asset: FlowAsset): number {
-    if (asset.status !== 'ok' || asset.zScore === null) return 86;
-    return 86 + Math.min(Math.abs(asset.zScore), 4) * 9;
+/** Sphere diameter grows with |z-score|: ~62px base + ~9px per σ, capped ~108px. */
+function sphereSize(asset: FlowAsset): number {
+    if (asset.status !== 'ok' || asset.zScore === null) return 76;
+    return Math.min(62 + Math.abs(asset.zScore) * 9, 108);
 }
 
-function NodeFace({ asset, size }: { asset: FlowAsset; size: number }) {
+/**
+ * A glossy dark sphere, as on his map: radial gradient lit from the
+ * top falling to near-black at the bottom, a thin ring in the node's
+ * colour and a large soft colour halo bleeding into the background.
+ * Inside ONLY the short ticker in bold white caps - the name, σ and
+ * % live in the label below the sphere, never inside it, and his map
+ * shows no prices on nodes. The glow is static: his nodes never
+ * pulse, breathe or flash; only the dots on the lines move.
+ */
+function SphereFace({ asset, size }: { asset: FlowAsset; size: number }) {
+    const ticker = TICKERS[asset.id] ?? asset.name;
+
     if (asset.status !== 'ok' || asset.zScore === null || asset.changePct === null) {
         return (
             <div
-                className="flex flex-col items-center justify-center rounded-full border border-dashed border-white/15 bg-white/[0.02] text-center"
-                style={{ width: size, height: size }}
+                className="flex items-center justify-center rounded-full border border-dashed text-center"
+                style={{
+                    width: size,
+                    height: size,
+                    borderColor: 'rgba(255,255,255,0.18)',
+                    background:
+                        'radial-gradient(circle at 50% 30%, rgba(255,255,255,0.05) 0%, rgba(2,4,8,0.6) 75%)'
+                }}
             >
-                <span className="px-1 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    {asset.name}
-                </span>
-                <span className="mt-0.5 text-[9px] uppercase tracking-wider text-muted-foreground/70">
-                    unavailable
+                <span className="px-1 text-[10px] font-bold uppercase tracking-[0.14em] text-white/40">
+                    {ticker}
                 </span>
             </div>
         );
     }
 
-    const color = directionColor(asset);
-    // Static soft glow in the node's own colour - his nodes never
-    // pulse, breathe or flash; only the dots on the lines move.
-    const faceStyle = {
-        width: size,
-        height: size,
-        border: `1px solid ${color}8c`,
-        background: `radial-gradient(circle at 50% 36%, ${color}2b 0%, ${color}0d 60%, rgba(2,4,8,0.55) 100%)`,
-        boxShadow: `0 10px 24px -12px rgba(0, 0, 0, 0.9), 0 0 20px -2px ${color}59, inset 0 0 16px -6px ${color}59`
-    } as CSSProperties;
-
+    const color = nodeColor(asset.zScore);
     return (
         <div
-            className="flex flex-col items-center justify-center rounded-full text-center"
-            style={faceStyle}
+            className="relative flex items-center justify-center rounded-full text-center"
+            style={
+                {
+                    width: size,
+                    height: size,
+                    border: `1.5px solid ${color}`,
+                    background: `radial-gradient(circle at 50% 28%, ${color}1f 0%, rgba(13,17,26,0.92) 52%, rgba(2,4,8,0.98) 100%)`,
+                    boxShadow: `0 0 44px 8px ${color}38, 0 0 96px 22px ${color}1a, inset 0 12px 20px rgba(255,255,255,0.09), inset 0 -16px 26px rgba(0,0,0,0.8), 0 16px 30px -14px rgba(0,0,0,0.9)`
+                } as CSSProperties
+            }
         >
-            <span className="px-1 text-[9px] font-semibold uppercase leading-tight tracking-[0.14em] text-white/70">
-                {asset.name}
+            <span className="pointer-events-none absolute left-1/2 top-[9%] h-[24%] w-[54%] -translate-x-1/2 rounded-full bg-white/10 blur-[7px]" />
+            <span className="relative text-[12px] font-extrabold uppercase tracking-[0.12em] text-white">
+                {ticker}
             </span>
-            <div
-                key={`${asset.zScore}|${asset.changePct}|${asset.price}`}
-                className="flowmap-value flex flex-col items-center"
-            >
-                <span className="font-mono text-[17px] font-bold leading-tight" style={{ color }}>
-                    {formatZ(asset.zScore)}
-                </span>
-                <span className="font-mono text-[11px] leading-tight" style={{ color }}>
-                    {formatSignedPct(asset.changePct)}
-                </span>
-                <span className="mt-0.5 font-mono text-[9px] leading-tight text-white/45">
-                    {formatPrice(asset)}
-                </span>
+        </div>
+    );
+}
+
+/** Label under a sphere: full asset name in white semibold, then "−3.6σ −9.45%" in the node's colour. */
+function NodeLabel({ asset }: { asset: FlowAsset }) {
+    if (asset.status !== 'ok' || asset.zScore === null || asset.changePct === null) {
+        return (
+            <div className="text-center">
+                <p className="whitespace-nowrap text-[12px] font-semibold text-white/60">
+                    {asset.name}
+                </p>
+                <p className="mt-0.5 text-[10px] uppercase tracking-wider text-white/35">
+                    unavailable
+                </p>
             </div>
+        );
+    }
+
+    const color = nodeColor(asset.zScore);
+    return (
+        <div className="text-center">
+            <p className="whitespace-nowrap text-[12px] font-semibold leading-tight text-white">
+                {asset.name}
+            </p>
+            <p
+                key={`${asset.zScore}|${asset.changePct}`}
+                className="flowmap-value mt-0.5 flex items-baseline justify-center gap-2 font-mono text-[11px] leading-tight"
+                style={{ color }}
+            >
+                <span>{formatZ(asset.zScore)}</span>
+                <span>{formatSignedPct(asset.changePct)}</span>
+            </p>
         </div>
     );
 }
@@ -169,7 +228,7 @@ function NodeFace({ asset, size }: { asset: FlowAsset; size: number }) {
 function MapNode({ asset }: { asset: FlowAsset }) {
     const pos = NODE_POSITIONS[asset.id];
     if (!pos) return null;
-    const size = nodeSize(asset);
+    const size = sphereSize(asset);
     const zIndex = asset.status === 'ok' && asset.zScore !== null ? 10 + Math.round(Math.abs(asset.zScore)) : 10;
     return (
         <div
@@ -177,35 +236,55 @@ function MapNode({ asset }: { asset: FlowAsset }) {
             style={{ left: `${pos.x}%`, top: `${pos.y}%`, zIndex }}
             title={`${asset.name} · ${formatPrice(asset)} · ${asset.source}`}
         >
-            <NodeFace asset={asset} size={size} />
+            <div className="relative">
+                <SphereFace asset={asset} size={size} />
+                <div className="pointer-events-none absolute left-1/2 top-full mt-1.5 w-max -translate-x-1/2">
+                    <NodeLabel asset={asset} />
+                </div>
+            </div>
         </div>
     );
 }
 
-/** The Fed node face, shared by the desktop map and the mobile grid.
- *  Static gold glow like every other node; the Fed never has edges. */
-function FedFace({ fed, size = 92 }: { fed: FlowMapData['fed']; size?: number }) {
+/**
+ * THE FED sphere, shared by the desktop map and the mobile grid:
+ * grey-white ring like his, "THE FED" inside in bold white caps and
+ * under it the days to the decision in gold as a decimal ("16.2
+ * days"), ticking locally from the scheduled instant the API
+ * returns. The Fed never has edges.
+ */
+function FedFace({ fed, size = 96 }: { fed: FlowMapData['fed']; size?: number }) {
+    const [now, setNow] = useState(() => Date.now());
+
+    useEffect(() => {
+        const interval = setInterval(() => setNow(Date.now()), 1000);
+        return () => clearInterval(interval);
+    }, []);
+
+    const days =
+        fed !== null ? Math.max(0, (new Date(fed.date).getTime() - now) / 86_400_000) : null;
+
     return (
         <div
-            className="flex flex-col items-center justify-center rounded-full text-center"
+            className="relative flex flex-col items-center justify-center rounded-full text-center"
             style={
                 {
                     width: size,
                     height: size,
-                    border: `1px solid ${GOLD}8c`,
-                    background: `radial-gradient(circle at 50% 36%, ${GOLD}2b 0%, ${GOLD}0d 60%, rgba(2,4,8,0.55) 100%)`,
-                    boxShadow: `0 10px 24px -12px rgba(0, 0, 0, 0.9), 0 0 20px -2px ${GOLD}4d, inset 0 0 16px -6px ${GOLD}4d`
+                    border: '1.5px solid rgba(216,222,230,0.75)',
+                    background:
+                        'radial-gradient(circle at 50% 28%, rgba(216,222,230,0.14) 0%, rgba(13,17,26,0.92) 52%, rgba(2,4,8,0.98) 100%)',
+                    boxShadow:
+                        '0 0 44px 8px rgba(216,222,230,0.13), 0 0 96px 22px rgba(216,222,230,0.06), inset 0 12px 20px rgba(255,255,255,0.09), inset 0 -16px 26px rgba(0,0,0,0.8), 0 16px 30px -14px rgba(0,0,0,0.9)'
                 } as CSSProperties
             }
         >
-            <span
-                className="text-[10px] font-bold uppercase tracking-[0.18em]"
-                style={{ color: GOLD }}
-            >
+            <span className="pointer-events-none absolute left-1/2 top-[9%] h-[24%] w-[54%] -translate-x-1/2 rounded-full bg-white/10 blur-[7px]" />
+            <span className="relative text-[11px] font-extrabold uppercase tracking-[0.16em] text-white">
                 The Fed
             </span>
-            <span className="mt-0.5 px-1 text-[9px] leading-tight text-white/70">
-                {fed ? fed.label.replace(/^\w{3}, /, '') : 'unavailable'}
+            <span className="relative mt-0.5 text-[11px] font-semibold" style={{ color: GOLD }}>
+                {days !== null ? `${days.toFixed(1)} days` : 'unavailable'}
             </span>
         </div>
     );
@@ -539,9 +618,14 @@ function MobileNodeGrid({ data, edges }: { data: FlowMapData; edges: FlowEdge[] 
     const Column = ({ title, assets }: { title: string; assets: FlowAsset[] }) => (
         <div>
             <p className={`mb-3 text-center ${LABEL_CLASS}`}>{title}</p>
-            <div className="flex flex-col items-center gap-4">
+            <div className="flex flex-col items-center gap-5">
                 {assets.map(asset => (
-                    <NodeFace key={asset.id} asset={asset} size={92} />
+                    <div key={asset.id} className="flex flex-col items-center">
+                        <SphereFace asset={asset} size={Math.min(sphereSize(asset), 96)} />
+                        <div className="mt-2">
+                            <NodeLabel asset={asset} />
+                        </div>
+                    </div>
                 ))}
             </div>
         </div>
@@ -591,40 +675,141 @@ function FedCountdown({ date, label }: { date: string; label: string }) {
     const days = Math.floor(diffMs / 86_400_000);
     const hours = Math.floor((diffMs % 86_400_000) / 3_600_000);
     const minutes = Math.floor((diffMs % 3_600_000) / 60_000);
-    const seconds = Math.floor((diffMs % 60_000) / 1000);
     const pad = (n: number) => String(n).padStart(2, '0');
 
     return (
         <div>
             <p className={LABEL_CLASS}>Next Fed rate decision</p>
-            <p className="mt-2 text-sm font-semibold">{label}</p>
-            <p className="mt-1 font-mono text-[22px] leading-tight" style={{ color: GOLD }}>
-                {days}d {pad(hours)}h {pad(minutes)}m {pad(seconds)}s
+            <p className="mt-2.5 font-mono text-[30px] font-bold leading-none text-white">
+                {days}d {pad(hours)}h {pad(minutes)}m
             </p>
-            <p className="mt-0.5 text-[10px] text-muted-foreground">2:00 PM New York</p>
+            <p className="mt-2 text-xs text-muted-foreground">{label} · FOMC rate decision</p>
         </div>
     );
 }
 
-function MiniStat({ asset, amber }: { asset: FlowAsset | undefined; amber?: boolean }) {
+/**
+ * One half of the VIX / DXY mini-box panel, styled like his: a
+ * "FEAR · VIX" / "DOLLAR · DXY" label, the plain value big in white
+ * (no $ - neither is a price in dollars) and the % change coloured
+ * beside it. For VIX the colour follows fear semantics (up = red).
+ */
+function MiniStat({
+    label,
+    asset,
+    fear
+}: {
+    label: string;
+    asset: FlowAsset | undefined;
+    fear?: boolean;
+}) {
+    const pctClass = (v: number) =>
+        fear
+            ? v >= 0
+                ? 'text-red-500'
+                : 'text-green-500'
+            : v >= 0
+              ? 'text-green-500'
+              : 'text-red-500';
+
     return (
-        <div className="glass rounded-xl px-3.5 py-3 shadow-[0_16px_36px_-24px_rgba(0,0,0,0.9)]">
-            <p className={LABEL_CLASS}>{asset?.name ?? '—'}</p>
+        <div className="px-4 py-3.5">
+            <p className={LABEL_CLASS}>{label}</p>
             {asset && asset.status === 'ok' && asset.price !== null ? (
                 <p
                     key={`${asset.price}|${asset.changePct}`}
-                    className="flowmap-value mt-1 font-mono text-base leading-tight"
+                    className="flowmap-value mt-1.5 flex items-baseline gap-2"
                 >
-                    <span className={amber ? 'text-amber-500' : undefined}>{formatPrice(asset)}</span>{' '}
-                    <span
-                        className={`text-xs ${(asset.changePct ?? 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}
-                    >
-                        {asset.changePct !== null ? formatSignedPct(asset.changePct) : ''}
+                    <span className="font-mono text-[22px] font-bold leading-none text-white">
+                        {asset.price.toLocaleString('en-US', {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2
+                        })}
                     </span>
+                    {asset.changePct !== null && (
+                        <span className={`font-mono text-xs ${pctClass(asset.changePct)}`}>
+                            {formatSignedPct(asset.changePct)}
+                        </span>
+                    )}
                 </p>
             ) : (
-                <p className="mt-1 text-sm text-muted-foreground">unavailable</p>
+                <p className="mt-1.5 text-sm text-muted-foreground">unavailable</p>
             )}
+        </div>
+    );
+}
+
+/**
+ * Semicircular risk gauge, as on his map: a half-donut arc graded
+ * red at the left end ("SAFETY") through yellow to green at the
+ * right end ("RISK"), a needle positioned by the score (-100 far
+ * left, +100 far right) that swings smoothly when a refresh changes
+ * the score, and the big "RISK-OFF -52" text inside the arc in the
+ * label's colour.
+ */
+function RiskGauge({
+    score,
+    label
+}: {
+    score: number;
+    label: 'RISK-ON' | 'RISK-OFF' | 'NEUTRAL';
+}) {
+    const fraction = (score + 100) / 200;
+    const needleDeg = -90 + fraction * 180;
+    const color = label === 'RISK-OFF' ? '#f43f5e' : label === 'RISK-ON' ? GREEN : NEUTRAL;
+    const arc = 'M 16 104 A 84 84 0 0 1 184 104';
+
+    return (
+        <div>
+            <div className="relative">
+                <svg viewBox="0 0 200 112" className="block h-auto w-full" aria-hidden="true">
+                    <defs>
+                        <linearGradient id="flow-gauge-grad" x1="0" y1="0" x2="1" y2="0">
+                            <stop offset="0%" stopColor={RED} />
+                            <stop offset="50%" stopColor={NEUTRAL} />
+                            <stop offset="100%" stopColor={GREEN} />
+                        </linearGradient>
+                    </defs>
+                    <path
+                        d={arc}
+                        fill="none"
+                        stroke="rgba(255,255,255,0.07)"
+                        strokeWidth="13"
+                        strokeLinecap="round"
+                    />
+                    <path
+                        d={arc}
+                        fill="none"
+                        stroke="url(#flow-gauge-grad)"
+                        strokeWidth="13"
+                        strokeLinecap="round"
+                    />
+                    <g
+                        style={
+                            {
+                                transform: `rotate(${needleDeg}deg)`,
+                                transformBox: 'fill-box',
+                                transformOrigin: '50% 100%',
+                                transition: 'transform 700ms ease-out'
+                            } as CSSProperties
+                        }
+                    >
+                        <path d="M 100 104 L 96.8 36 L 103.2 36 Z" fill="#e8ecf1" />
+                    </g>
+                    <circle cx="100" cy="104" r="5.5" fill="#0b0e13" stroke="#e8ecf1" strokeWidth="1.5" />
+                </svg>
+                <p
+                    key={`${label}|${score}`}
+                    className="flowmap-value absolute inset-x-0 bottom-[19%] text-center text-[19px] font-extrabold tracking-wide"
+                    style={{ color }}
+                >
+                    {label} {score}
+                </p>
+            </div>
+            <div className="mt-1 flex justify-between text-[9px] font-semibold uppercase tracking-[0.2em] text-white/40">
+                <span>Safety</span>
+                <span>Risk</span>
+            </div>
         </div>
     );
 }
@@ -708,15 +893,6 @@ export function FlowMapClient({ initialData }: { initialData: FlowMapData }) {
     }
 
     const meter = data.riskMeter;
-    const meterPct = meter ? (meter.score + 100) / 2 : 50;
-    const meterHex =
-        meter?.label === 'RISK-OFF' ? RED : meter?.label === 'RISK-ON' ? GREEN : NEUTRAL;
-    const meterColor =
-        meter?.label === 'RISK-OFF'
-            ? 'text-red-500'
-            : meter?.label === 'RISK-ON'
-              ? 'text-green-500'
-              : 'text-yellow-500';
     const vix = data.assets.find(a => a.id === 'vix');
     const dollar = data.assets.find(a => a.id === 'dollar');
     const mapAssets = data.assets.filter(a => NODE_POSITIONS[a.id]);
@@ -769,25 +945,28 @@ export function FlowMapClient({ initialData }: { initialData: FlowMapData }) {
                 {/* Node map */}
                 <div
                     className={`glass relative overflow-hidden rounded-2xl ${panelShadow} lg:col-span-2`}
+                    style={{ backgroundColor: '#05070c' }}
                 >
-                    <div className="flex items-baseline justify-between gap-2 border-b border-white/[0.06] px-5 py-3.5">
-                        <span
-                            className="text-xs font-bold uppercase tracking-[0.24em]"
-                            style={{ color: GOLD }}
-                        >
+                    <div className="border-b border-white/[0.06] px-5 py-4">
+                        <p className="text-[22px] font-extrabold uppercase leading-none tracking-[0.06em] text-white">
                             Money Flow Map
-                        </span>
-                        <span className="text-right text-[9px] uppercase tracking-[0.18em] text-muted-foreground">
-                            Where the world&rsquo;s money is moving
-                        </span>
+                        </p>
+                        <p className="mt-1.5 text-[9px] uppercase tracking-[0.3em] text-white/40">
+                            Where the world&rsquo;s money is moving · Speculative read
+                        </p>
                     </div>
 
-                    {/* Desktop / tablet: absolute node layout */}
+                    {/* Desktop / tablet: his fixed scatter of spheres on a
+                        near-black field - faint concentric radar circles
+                        centred behind the Fed and a subtle dotted grid,
+                        both static decoration. Lines render behind the
+                        spheres; the dot streams ride above the lines. */}
                     <div
-                        className="relative hidden h-[540px] min-[481px]:block"
+                        className="relative hidden h-[580px] min-[481px]:block"
                         style={{
-                            background:
-                                'radial-gradient(ellipse at 28% 18%, rgba(255,255,255,0.03), transparent 55%), radial-gradient(ellipse at 76% 82%, rgba(212,175,55,0.045), transparent 52%)'
+                            backgroundImage:
+                                'radial-gradient(rgba(148,163,184,0.07) 1px, transparent 1.3px), repeating-radial-gradient(circle at 34% 53%, transparent 0px, transparent 87px, rgba(148,163,184,0.05) 87px, rgba(148,163,184,0.05) 88px)',
+                            backgroundSize: '26px 26px, 100% 100%'
                         }}
                     >
                         <MapEdges edges={edges} />
@@ -796,12 +975,6 @@ export function FlowMapClient({ initialData }: { initialData: FlowMapData }) {
                             <MapNode key={asset.id} asset={asset} />
                         ))}
                         <FedNode fed={data.fed} />
-                        <span className="absolute left-4 top-3 text-[9px] font-semibold uppercase tracking-[0.2em] text-white/35">
-                            Risk
-                        </span>
-                        <span className="absolute right-4 top-3 text-[9px] font-semibold uppercase tracking-[0.2em] text-white/35">
-                            Safety
-                        </span>
                     </div>
 
                     {/* Narrow screens: two-column node grid */}
@@ -815,37 +988,17 @@ export function FlowMapClient({ initialData }: { initialData: FlowMapData }) {
                     {meter && (
                         <div className={`glass rounded-2xl p-5 ${panelShadow}`}>
                             <p className={LABEL_CLASS}>Risk-On / Risk-Off Meter</p>
-                            <p
-                                key={meter.score}
-                                className={`flowmap-value mt-2 font-mono text-5xl font-bold leading-none transition-colors duration-700 ${meterColor}`}
-                            >
-                                {meter.score > 0 ? '+' : ''}
-                                {meter.score}
-                            </p>
-                            <p
-                                className={`mt-1.5 text-sm font-bold tracking-[0.18em] transition-colors duration-700 ${meterColor}`}
-                            >
-                                {meter.label}
-                            </p>
-                            <div className="relative mt-4 h-2 overflow-hidden rounded-full bg-white/[0.07]">
-                                <div
-                                    className="absolute inset-y-0 left-0 rounded-full transition-[width] duration-700 ease-out"
-                                    style={{ width: `${meterPct}%`, background: meterHex }}
-                                />
+                            <div className="mt-3">
+                                <RiskGauge score={meter.score} label={meter.label} />
                             </div>
-                            <div className="mt-1.5 flex justify-between text-[10px] text-muted-foreground">
-                                <span>−100 RISK-OFF</span>
-                                <span>+100 RISK-ON</span>
-                            </div>
-                            <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
-                                Speculative read — computed from public market data.
-                            </p>
                         </div>
                     )}
 
-                    <div className="grid grid-cols-2 gap-5">
-                        <MiniStat asset={vix} amber />
-                        <MiniStat asset={dollar} />
+                    <div
+                        className={`glass grid grid-cols-2 divide-x divide-white/[0.06] rounded-2xl ${panelShadow}`}
+                    >
+                        <MiniStat label="Fear · VIX" asset={vix} fear />
+                        <MiniStat label="Dollar · DXY" asset={dollar} />
                     </div>
 
                     {data.fed && (
