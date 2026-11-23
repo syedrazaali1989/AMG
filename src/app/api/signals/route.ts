@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { MarketDataManager } from '@/lib/signals/marketData';
-import { BinanceAPI } from '@/lib/signals/binanceAPI';
-import { SignalGenerator } from '@/lib/signals/generator';
-import { MarketType, SignalType } from '@/lib/signals/types';
+import { generateStandardSignals, STANDARD_DEFAULT_PAIRS } from '@/lib/signals/standardSignals';
+import { SignalType } from '@/lib/signals/types';
+import { maybeCheckAndNotify } from '@/lib/push/notify';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,15 +20,11 @@ export const dynamic = 'force-dynamic';
  * If live market data cannot be fetched at all, this returns 502 and the
  * dashboard shows a "live data unavailable" state - signals are NEVER
  * generated from simulated prices.
+ *
+ * Side effect: a successful response opportunistically triggers the
+ * push-notification watcher (throttled, fire-and-forget, fully guarded -
+ * it can never break or delay this response).
  */
-
-// Standard scan list (the site's default crypto universe)
-const DEFAULT_PAIRS = [
-    'BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'SOL/USDT', 'XRP/USDT', 'DOGE/USDT',
-    'ADA/USDT', 'AVAX/USDT', 'DOT/USDT', 'LINK/USDT', 'UNI/USDT', 'NEAR/USDT',
-    'SUI/USDT', 'OP/USDT', 'ARB/USDT', 'MATIC/USDT', 'ATOM/USDT', 'FIL/USDT',
-    'INJ/USDT', 'RNDR/USDT', 'FET/USDT', 'TIA/USDT', 'PEPE/USDT', 'WLD/USDT'
-];
 
 // Short server-side cache so concurrent visitors share one generation pass
 // (mirrors the /api/binance/prices caching pattern).
@@ -54,12 +49,13 @@ export async function GET(request: NextRequest) {
         const pairsParam = searchParams.get('pairs');
         const pairs = pairsParam
             ? pairsParam.split(',').map(p => p.trim()).filter(Boolean).slice(0, 30)
-            : DEFAULT_PAIRS;
+            : STANDARD_DEFAULT_PAIRS;
 
         const cacheKey = `${market}|${signalType}|${pairs.join(',')}`;
         const now = Date.now();
         const cached = signalCache.get(cacheKey);
         if (cached && now - cached.timestamp < CACHE_DURATION) {
+            void maybeCheckAndNotify();
             return NextResponse.json({
                 signals: cached.signals,
                 generatedAt: new Date(cached.timestamp).toISOString(),
@@ -67,16 +63,9 @@ export async function GET(request: NextRequest) {
             });
         }
 
-        // Fetch live market data per pair; pairs that fail are skipped.
-        const results = await Promise.allSettled(
-            pairs.map(pair => MarketDataManager.generateMarketData(pair, MarketType.CRYPTO, 100))
-        );
+        const result = await generateStandardSignals(pairs, signalType);
 
-        const marketDataList = results
-            .filter(r => r.status === 'fulfilled')
-            .map(r => (r as PromiseFulfilledResult<Awaited<ReturnType<typeof MarketDataManager.generateMarketData>>>).value);
-
-        if (marketDataList.length === 0) {
+        if (result.pairsLoaded === 0) {
             // Live data is down: say so, never fall back to simulated prices.
             return NextResponse.json(
                 { error: 'Live market data unavailable' },
@@ -84,34 +73,11 @@ export async function GET(request: NextRequest) {
             );
         }
 
-        // Enrich each pair with the signal-quality filter context:
-        //  - closes4h:   the pair's 4H closes (multi-timeframe filter)
-        //  - btcTrend:   market-wide BTC regime vs its 4H EMA200 (fetched once)
-        //  - fundingRate: latest futures funding (FUTURE signals only)
-        // Any piece that fails to load stays undefined and its filter
-        // simply does not block - context failure never invents data and
-        // never blocks signal generation.
-        const btcTrend = await BinanceAPI.getBtcRegime();
-        await Promise.allSettled(
-            marketDataList.map(async (md) => {
-                md.btcTrend = btcTrend;
-                try {
-                    md.closes4h = await BinanceAPI.get4hCloses(md.pair, 250);
-                } catch {
-                    console.warn(`4H closes unavailable for ${md.pair} (MTF filter neutral)`);
-                }
-                if (signalType === SignalType.FUTURE) {
-                    md.fundingRate = await BinanceAPI.getFundingRate(md.pair);
-                }
-            })
-        );
+        signalCache.set(cacheKey, { signals: result.signals as unknown[], timestamp: now });
 
-        const signals = await SignalGenerator.generateMultipleSignals(marketDataList, signalType);
-
-        signalCache.set(cacheKey, { signals: signals as unknown[], timestamp: now });
-
+        void maybeCheckAndNotify();
         return NextResponse.json({
-            signals,
+            signals: result.signals,
             generatedAt: new Date(now).toISOString(),
             cached: false
         });
