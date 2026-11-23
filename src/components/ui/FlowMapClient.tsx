@@ -13,14 +13,19 @@ import type { FlowAsset, FlowMapData } from '@/lib/signals/flowMap';
  * then Roman Urdu - wording the user explicitly ordered for
  * first-time readers), and a scrolling ticker along the bottom.
  *
- * The map breathes: every live node carries a soft pulsing glow ring
- * whose speed and strength scale with its |z-score|, the cluster
- * links drift faintly, and gold particles travel the main
- * outflow -> inflow path so the money movement is visible, not just
- * implied. All motion is CSS keyframes plus one small
- * requestAnimationFrame loop for the particles (HTML dots stay round
- * at any panel aspect ratio, unlike stretched-SVG motion), and every
- * heavy animation is disabled under prefers-reduced-motion.
+ * The line system reproduces Waqar Zaka's MONEY FLOW MAP as measured
+ * frame-by-frame from his videos (see
+ * ~/workspace/wz-research/flowmap-animation-notes.md): edges are a
+ * topological chain, not a timed sequence. Sinks (z >= +1.5) receive
+ * a gently curved, gradient ribbon from every source (z <= -0.3)
+ * below them and from every weaker sink, so money reads as flowing
+ * loser -> intermediate gainer -> biggest gainer. Small white dots
+ * stream along EVERY edge simultaneously at a slow ambient drift,
+ * looping seamlessly; nodes themselves never pulse or flash - they
+ * carry a static soft glow in their own colour. The dots are HTML
+ * spans driven by one requestAnimationFrame loop (they stay round at
+ * any panel aspect ratio, unlike stretched-SVG motion) and rest at
+ * fixed points under prefers-reduced-motion.
  *
  * All data comes from /api/flow-map (public sources only); an asset
  * whose source fails shows as a greyed "unavailable" node - nothing
@@ -82,24 +87,15 @@ const NODE_POSITIONS: Record<string, { x: number; y: number }> = {
 
 const FED_POSITION = { x: 52, y: 86 };
 
-/** Faint network links inside each cluster. */
-const NODE_LINKS: [string, string][] = [
-    ['spx', 'nasdaq'],
-    ['nasdaq', 'eth'],
-    ['eth', 'btc'],
-    ['btc', 'crude'],
-    ['btc', 'silver'],
-    ['eth', 'silver'],
-    ['gold', 'bonds'],
-    ['bonds', 'stablecoins'],
-    ['gold', 'dollar'],
-    ['dollar', 'stablecoins']
-];
-
 const GREEN = '#22c55e';
 const RED = '#ef4444';
 const GOLD = '#D4AF37';
 const NEUTRAL = '#eab308';
+
+/** Colour of an asset by the sign of its z-score (his node colours). */
+function zColor(z: number): string {
+    return z >= 0 ? GREEN : RED;
+}
 
 /** Shared panel-label typography: one hierarchy everywhere. */
 const LABEL_CLASS =
@@ -114,21 +110,6 @@ function directionColor(asset: FlowAsset): string {
 function nodeSize(asset: FlowAsset): number {
     if (asset.status !== 'ok' || asset.zScore === null) return 86;
     return 86 + Math.min(Math.abs(asset.zScore), 4) * 9;
-}
-
-/**
- * Breathing cadence for a node, scaled by |z-score|: calm nodes pulse
- * slowly and faintly (3.6s), extreme nodes visibly faster (1.7s) with
- * a second, phase-shifted ring once |z| reaches 1.5.
- */
-function pulseParams(z: number | null): { duration: number; rings: number; ringOpacity: number } {
-    const mag = Math.min(Math.abs(z ?? 0), 4);
-    const strength = mag / 4;
-    return {
-        duration: 3.6 - strength * 1.9,
-        rings: mag >= 1.5 ? 2 : 1,
-        ringOpacity: 0.18 + strength * 0.45
-    };
 }
 
 function NodeFace({ asset, size }: { asset: FlowAsset; size: number }) {
@@ -149,54 +130,37 @@ function NodeFace({ asset, size }: { asset: FlowAsset; size: number }) {
     }
 
     const color = directionColor(asset);
-    const { duration, rings, ringOpacity } = pulseParams(asset.zScore);
+    // Static soft glow in the node's own colour - his nodes never
+    // pulse, breathe or flash; only the dots on the lines move.
     const faceStyle = {
         width: size,
         height: size,
         border: `1px solid ${color}8c`,
         background: `radial-gradient(circle at 50% 36%, ${color}2b 0%, ${color}0d 60%, rgba(2,4,8,0.55) 100%)`,
-        '--fm-glow': `${color}59`,
-        '--fm-dur': `${duration}s`
+        boxShadow: `0 10px 24px -12px rgba(0, 0, 0, 0.9), 0 0 20px -2px ${color}59, inset 0 0 16px -6px ${color}59`
     } as CSSProperties;
 
     return (
-        <div className="relative" style={{ width: size, height: size }}>
-            {Array.from({ length: rings }).map((_, i) => (
-                <span
-                    key={i}
-                    aria-hidden="true"
-                    className="flowmap-ring pointer-events-none absolute inset-0 rounded-full"
-                    style={
-                        {
-                            border: `1.5px solid ${color}`,
-                            '--fm-dur': `${duration}s`,
-                            '--fm-ring-o': ringOpacity,
-                            animationDelay: `${(duration / rings) * i}s`
-                        } as CSSProperties
-                    }
-                />
-            ))}
+        <div
+            className="flex flex-col items-center justify-center rounded-full text-center"
+            style={faceStyle}
+        >
+            <span className="px-1 text-[9px] font-semibold uppercase leading-tight tracking-[0.14em] text-white/70">
+                {asset.name}
+            </span>
             <div
-                className="flowmap-node flex h-full w-full flex-col items-center justify-center rounded-full text-center"
-                style={faceStyle}
+                key={`${asset.zScore}|${asset.changePct}|${asset.price}`}
+                className="flowmap-value flex flex-col items-center"
             >
-                <span className="px-1 text-[9px] font-semibold uppercase leading-tight tracking-[0.14em] text-white/70">
-                    {asset.name}
+                <span className="font-mono text-[17px] font-bold leading-tight" style={{ color }}>
+                    {formatZ(asset.zScore)}
                 </span>
-                <div
-                    key={`${asset.zScore}|${asset.changePct}|${asset.price}`}
-                    className="flowmap-value flex flex-col items-center"
-                >
-                    <span className="font-mono text-[17px] font-bold leading-tight" style={{ color }}>
-                        {formatZ(asset.zScore)}
-                    </span>
-                    <span className="font-mono text-[11px] leading-tight" style={{ color }}>
-                        {formatSignedPct(asset.changePct)}
-                    </span>
-                    <span className="mt-0.5 font-mono text-[9px] leading-tight text-white/45">
-                        {formatPrice(asset)}
-                    </span>
-                </div>
+                <span className="font-mono text-[11px] leading-tight" style={{ color }}>
+                    {formatSignedPct(asset.changePct)}
+                </span>
+                <span className="mt-0.5 font-mono text-[9px] leading-tight text-white/45">
+                    {formatPrice(asset)}
+                </span>
             </div>
         </div>
     );
@@ -218,42 +182,31 @@ function MapNode({ asset }: { asset: FlowAsset }) {
     );
 }
 
-/** The Fed node face, shared by the desktop map and the mobile grid. */
+/** The Fed node face, shared by the desktop map and the mobile grid.
+ *  Static gold glow like every other node; the Fed never has edges. */
 function FedFace({ fed, size = 92 }: { fed: FlowMapData['fed']; size?: number }) {
     return (
-        <div className="relative" style={{ width: size, height: size }}>
+        <div
+            className="flex flex-col items-center justify-center rounded-full text-center"
+            style={
+                {
+                    width: size,
+                    height: size,
+                    border: `1px solid ${GOLD}8c`,
+                    background: `radial-gradient(circle at 50% 36%, ${GOLD}2b 0%, ${GOLD}0d 60%, rgba(2,4,8,0.55) 100%)`,
+                    boxShadow: `0 10px 24px -12px rgba(0, 0, 0, 0.9), 0 0 20px -2px ${GOLD}4d, inset 0 0 16px -6px ${GOLD}4d`
+                } as CSSProperties
+            }
+        >
             <span
-                aria-hidden="true"
-                className="flowmap-ring pointer-events-none absolute inset-0 rounded-full"
-                style={
-                    {
-                        border: `1.5px solid ${GOLD}`,
-                        '--fm-dur': '3.8s',
-                        '--fm-ring-o': 0.28
-                    } as CSSProperties
-                }
-            />
-            <div
-                className="flowmap-node flex h-full w-full flex-col items-center justify-center rounded-full text-center"
-                style={
-                    {
-                        border: `1px solid ${GOLD}8c`,
-                        background: `radial-gradient(circle at 50% 36%, ${GOLD}2b 0%, ${GOLD}0d 60%, rgba(2,4,8,0.55) 100%)`,
-                        '--fm-glow': `${GOLD}4d`,
-                        '--fm-dur': '3.8s'
-                    } as CSSProperties
-                }
+                className="text-[10px] font-bold uppercase tracking-[0.18em]"
+                style={{ color: GOLD }}
             >
-                <span
-                    className="text-[10px] font-bold uppercase tracking-[0.18em]"
-                    style={{ color: GOLD }}
-                >
-                    The Fed
-                </span>
-                <span className="mt-0.5 px-1 text-[9px] leading-tight text-white/70">
-                    {fed ? fed.label.replace(/^\w{3}, /, '') : 'unavailable'}
-                </span>
-            </div>
+                The Fed
+            </span>
+            <span className="mt-0.5 px-1 text-[9px] leading-tight text-white/70">
+                {fed ? fed.label.replace(/^\w{3}, /, '') : 'unavailable'}
+            </span>
         </div>
     );
 }
@@ -269,69 +222,227 @@ function FedNode({ fed }: { fed: FlowMapData['fed'] }) {
     );
 }
 
-/** The main money path endpoints, resolved from the API flow summary. */
-function flowEndpoints(data: FlowMapData): { from: FlowAsset; to: FlowAsset } | null {
-    if (!data.flowSummary) return null;
-    const out = data.assets.find(a => a.name === data.flowSummary?.outflowName);
-    const into = data.assets.find(a => a.name === data.flowSummary?.inflowName);
-    if (!out || !into || out.id === into.id) return null;
-    if (!NODE_POSITIONS[out.id] || !NODE_POSITIONS[into.id]) return null;
-    return { from: out, to: into };
-}
-
-/** Quadratic control point for the flow curve - shared by the SVG path
- *  and the particle motion so the dots ride exactly on the line. */
-function flowControlPoint(p1: { x: number; y: number }, p2: { x: number; y: number }) {
-    return { x: (p1.x + p2.x) / 2, y: Math.min(p1.y, p2.y) - 10 };
+/** One directed money-flow edge, source -> sink. */
+interface FlowEdge {
+    from: FlowAsset;
+    to: FlowAsset;
+    key: string;
 }
 
 /**
- * Gold particles travelling the outflow -> inflow curve. HTML dots
- * driven by one rAF loop: unlike SVG animateMotion inside the
- * aspect-stretched underlay, they stay perfectly round at any panel
- * size. Under prefers-reduced-motion they rest at fixed points along
- * the path instead of travelling.
+ * The edge rule, exactly as measured from Waqar Zaka's map
+ * (flowmap-animation-notes.md §5): the chain is topological, not
+ * timed. Sinks are assets with z >= +1.5; sources are assets with
+ * z <= -0.3. Every source links to every sink stronger than it, and
+ * every weaker sink links onward to every stronger sink - which is
+ * what builds the multi-hop chain (Gold -> Bonds -> Stablecoins)
+ * when two sinks exist, and leaves only direct edges when there is
+ * just one sink. Assets between -0.3 and +1.5 get no edges, the Fed
+ * never has any, and with no sinks or no sources there are no edges
+ * at all. Only assets placed on the map take part.
  */
-function FlowParticles({ from, to }: { from: FlowAsset; to: FlowAsset }) {
+const SINK_Z = 1.5;
+const SOURCE_Z = -0.3;
+
+function computeFlowEdges(assets: FlowAsset[]): FlowEdge[] {
+    const live = assets.filter(
+        a => a.status === 'ok' && a.zScore !== null && NODE_POSITIONS[a.id]
+    ) as (FlowAsset & { zScore: number })[];
+    const sinks = live.filter(a => a.zScore >= SINK_Z);
+    const sources = live.filter(a => a.zScore <= SOURCE_Z);
+    if (sinks.length === 0 || sources.length === 0) return [];
+
+    const edges: FlowEdge[] = [];
+    const push = (from: (typeof live)[number], to: (typeof live)[number]) => {
+        if (from.id !== to.id) {
+            edges.push({ from, to, key: `${from.id}->${to.id}` });
+        }
+    };
+    for (const source of sources) {
+        for (const sink of sinks) {
+            if (sink.zScore > source.zScore) push(source, sink);
+        }
+    }
+    for (const weaker of sinks) {
+        for (const stronger of sinks) {
+            if (stronger.zScore > weaker.zScore) push(weaker, stronger);
+        }
+    }
+    return edges;
+}
+
+/**
+ * Quadratic control point for an edge: the midpoint pushed sideways
+ * (perpendicular to the chord) by ~12% of the chord length, so every
+ * ribbon bows gently like his. Shared by the SVG path and the dot
+ * motion so the dots ride exactly on the ribbon. Coordinates are in
+ * map % space; the SVG's non-scaling viewBox applies the same affine
+ * stretch to both, so they stay in register at any panel size.
+ */
+function edgeControlPoint(p1: { x: number; y: number }, p2: { x: number; y: number }) {
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const bow = Math.min(len * 0.12, 10);
+    return {
+        x: (p1.x + p2.x) / 2 + (dy / len) * bow,
+        y: (p1.y + p2.y) / 2 - (dx / len) * bow
+    };
+}
+
+function edgePathD(edge: FlowEdge): string {
+    const p1 = NODE_POSITIONS[edge.from.id];
+    const p2 = NODE_POSITIONS[edge.to.id];
+    const c = edgeControlPoint(p1, p2);
+    return `M ${p1.x} ${p1.y} Q ${c.x} ${c.y} ${p2.x} ${p2.y}`;
+}
+
+/** Sampled bézier points with cumulative arc lengths, in pixels. */
+function sampleEdge(
+    edge: FlowEdge,
+    width: number,
+    height: number
+): { points: { x: number; y: number }[]; cum: number[]; total: number } {
+    const p1 = NODE_POSITIONS[edge.from.id];
+    const p2 = NODE_POSITIONS[edge.to.id];
+    const c = edgeControlPoint(p1, p2);
+    const toPx = (p: { x: number; y: number }) => ({
+        x: (p.x / 100) * width,
+        y: (p.y / 100) * height
+    });
+    const a = toPx(p1);
+    const b = toPx(c);
+    const d = toPx(p2);
+    const STEPS = 120;
+    const points: { x: number; y: number }[] = [];
+    const cum: number[] = [0];
+    for (let i = 0; i <= STEPS; i++) {
+        const t = i / STEPS;
+        const u = 1 - t;
+        const pt = {
+            x: u * u * a.x + 2 * u * t * b.x + t * t * d.x,
+            y: u * u * a.y + 2 * u * t * b.y + t * t * d.y
+        };
+        if (i > 0) {
+            const prev = points[i - 1];
+            cum.push(cum[i - 1] + Math.hypot(pt.x - prev.x, pt.y - prev.y));
+        }
+        points.push(pt);
+    }
+    return { points, cum, total: cum[STEPS] };
+}
+
+function pointAtArc(
+    sampled: { points: { x: number; y: number }[]; cum: number[]; total: number },
+    s: number
+): { x: number; y: number } {
+    const { points, cum, total } = sampled;
+    const target = ((s % total) + total) % total;
+    let lo = 0;
+    let hi = cum.length - 1;
+    while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (cum[mid] < target) lo = mid + 1;
+        else hi = mid;
+    }
+    const i = Math.max(1, lo);
+    const segLen = cum[i] - cum[i - 1] || 1;
+    const f = (target - cum[i - 1]) / segLen;
+    return {
+        x: points[i - 1].x + (points[i].x - points[i - 1].x) * f,
+        y: points[i - 1].y + (points[i].y - points[i - 1].y) * f
+    };
+}
+
+/**
+ * Dot-stream tuning, scaled from his measured values: dots ~55px
+ * apart on a ~1100px-wide map, drifting at ~10px/s (his 7-13 px/s at
+ * 1920w, with the same spacing-to-speed ratio, so the stream visibly
+ * creeps). Dot counts are estimated in a nominal 1000x540 space so
+ * server and client render the same spans; placement uses the real
+ * measured panel size.
+ */
+const DOT_SPACING_PX = 55;
+const DOT_SPEED_PX_S = 10;
+
+function edgeDotCount(edge: FlowEdge): number {
+    const { total } = sampleEdge(edge, 1000, 540);
+    return Math.max(2, Math.round(total / DOT_SPACING_PX));
+}
+
+/**
+ * White dots streaming along EVERY edge at once, source -> sink,
+ * looping seamlessly - the only moving elements inside his map.
+ * One rAF loop drives all edges; each edge's dots sit at fixed
+ * arc-length offsets that advance together, so spacing stays even
+ * along the curve. Under prefers-reduced-motion the dots rest at
+ * those fixed offsets instead of travelling.
+ */
+function FlowDots({ edges }: { edges: FlowEdge[] }) {
     const wrapRef = useRef<HTMLDivElement>(null);
+    const signature = edges.map(e => e.key).join(',');
 
     useEffect(() => {
         const wrap = wrapRef.current;
-        const p1 = NODE_POSITIONS[from.id];
-        const p2 = NODE_POSITIONS[to.id];
-        if (!wrap || !p1 || !p2) return;
-        const dots = Array.from(wrap.children) as HTMLElement[];
-        const ctrl = flowControlPoint(p1, p2);
-        const pointAt = (t: number) => {
-            const u = 1 - t;
-            return {
-                x: u * u * p1.x + 2 * u * t * ctrl.x + t * t * p2.x,
-                y: u * u * p1.y + 2 * u * t * ctrl.y + t * t * p2.y
-            };
+        if (!wrap || edges.length === 0) return;
+        const groups = new Map<string, HTMLElement[]>();
+        Array.from(wrap.children).forEach(child => {
+            const el = child as HTMLElement;
+            const key = el.dataset.edge;
+            if (!key) return;
+            const list = groups.get(key) ?? [];
+            list.push(el);
+            groups.set(key, list);
+        });
+
+        let raf = 0;
+        let sampled = new Map<string, ReturnType<typeof sampleEdge>>();
+        const measure = () => {
+            const w = wrap.clientWidth;
+            const h = wrap.clientHeight;
+            sampled = new Map(edges.map(e => [e.key, sampleEdge(e, w, h)]));
         };
-        const place = (t: number, dot: HTMLElement) => {
-            const p = pointAt(t);
-            dot.style.left = `${p.x}%`;
-            dot.style.top = `${p.y}%`;
-            dot.style.opacity = `${Math.sin(Math.PI * t) * 0.95}`;
+        measure();
+
+        const placeAll = (advancePx: number) => {
+            for (const edge of edges) {
+                const s = sampled.get(edge.key);
+                const dots = groups.get(edge.key);
+                if (!s || !dots || s.total === 0) continue;
+                const spacing = s.total / dots.length;
+                dots.forEach((dot, i) => {
+                    const p = pointAtArc(s, i * spacing + advancePx);
+                    dot.style.left = `${p.x}px`;
+                    dot.style.top = `${p.y}px`;
+                    dot.style.opacity = '0.95';
+                });
+            }
         };
 
         if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-            [0.3, 0.55, 0.8].forEach((t, i) => dots[i] && place(t, dots[i]));
+            placeAll(0);
             return;
         }
 
-        let raf = 0;
-        const DURATION = 3600;
+        const observer = new ResizeObserver(() => {
+            measure();
+        });
+        observer.observe(wrap);
+
         const start = performance.now();
         const tick = (now: number) => {
-            const base = ((now - start) % DURATION) / DURATION;
-            dots.forEach((dot, i) => place((base + i / dots.length) % 1, dot));
+            placeAll(((now - start) / 1000) * DOT_SPEED_PX_S);
             raf = requestAnimationFrame(tick);
         };
         raf = requestAnimationFrame(tick);
-        return () => cancelAnimationFrame(raf);
-    }, [from.id, to.id]);
+        return () => {
+            cancelAnimationFrame(raf);
+            observer.disconnect();
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [signature]);
+
+    if (edges.length === 0) return null;
 
     return (
         <div
@@ -339,30 +450,29 @@ function FlowParticles({ from, to }: { from: FlowAsset; to: FlowAsset }) {
             className="pointer-events-none absolute inset-0 z-[5]"
             aria-hidden="true"
         >
-            {[0, 1, 2].map(i => (
-                <span key={i} className="flowmap-particle" style={{ opacity: 0 }} />
-            ))}
+            {edges.map(edge => {
+                const count = edgeDotCount(edge);
+                return Array.from({ length: count }).map((_, i) => (
+                    <span
+                        key={`${edge.key}-${i}`}
+                        data-edge={edge.key}
+                        className="flowmap-dot"
+                        style={{ opacity: 0 }}
+                    />
+                ));
+            })}
         </div>
     );
 }
 
-/** SVG underlay: faint drifting cluster links + the main flow line. */
-function MapLinks({
-    flow,
-    assets
-}: {
-    flow: { from: FlowAsset; to: FlowAsset } | null;
-    assets: FlowAsset[];
-}) {
-    const okIds = new Set(assets.filter(a => a.status === 'ok').map(a => a.id));
-    let flowPath: string | null = null;
-    if (flow) {
-        const p1 = NODE_POSITIONS[flow.from.id];
-        const p2 = NODE_POSITIONS[flow.to.id];
-        const c = flowControlPoint(p1, p2);
-        flowPath = `M ${p1.x} ${p1.y} Q ${c.x} ${c.y} ${p2.x} ${p2.y}`;
-    }
-
+/**
+ * SVG underlay: the flow ribbons. Each edge is a gently curved
+ * quadratic bézier drawn twice - a wide, faint glow underlay and a
+ * ~3px core - stroked with a linear gradient from the source node's
+ * colour to the destination node's colour, at low opacity so the
+ * crossings stay readable.
+ */
+function MapEdges({ edges }: { edges: FlowEdge[] }) {
     return (
         <svg
             className="pointer-events-none absolute inset-0 h-full w-full"
@@ -371,68 +481,60 @@ function MapLinks({
             aria-hidden="true"
         >
             <defs>
-                <marker
-                    id="flow-arrow"
-                    viewBox="0 0 10 10"
-                    refX="8"
-                    refY="5"
-                    markerWidth="5"
-                    markerHeight="5"
-                    orient="auto-start-reverse"
-                >
-                    <path d="M 0 0 L 10 5 L 0 10 z" fill={GOLD} fillOpacity="0.7" />
-                </marker>
+                {edges.map(edge => {
+                    const p1 = NODE_POSITIONS[edge.from.id];
+                    const p2 = NODE_POSITIONS[edge.to.id];
+                    return (
+                        <linearGradient
+                            key={edge.key}
+                            id={`flow-grad-${edge.from.id}-${edge.to.id}`}
+                            gradientUnits="userSpaceOnUse"
+                            x1={p1.x}
+                            y1={p1.y}
+                            x2={p2.x}
+                            y2={p2.y}
+                        >
+                            <stop offset="0%" stopColor={zColor(edge.from.zScore ?? 0)} />
+                            <stop offset="100%" stopColor={zColor(edge.to.zScore ?? 0)} />
+                        </linearGradient>
+                    );
+                })}
             </defs>
-            {NODE_LINKS.map(([a, b]) => {
-                const pa = NODE_POSITIONS[a];
-                const pb = NODE_POSITIONS[b];
-                if (!pa || !pb || !okIds.has(a) || !okIds.has(b)) return null;
+            {edges.map(edge => {
+                const grad = `url(#flow-grad-${edge.from.id}-${edge.to.id})`;
+                const d = edgePathD(edge);
                 return (
-                    <line
-                        key={`${a}-${b}`}
-                        x1={pa.x}
-                        y1={pa.y}
-                        x2={pb.x}
-                        y2={pb.y}
-                        stroke="#ffffff"
-                        strokeOpacity="0.07"
-                        strokeWidth="1"
-                        strokeDasharray="2.5 4.5"
-                        vectorEffect="non-scaling-stroke"
-                        className="flowmap-link"
-                    />
+                    <g key={edge.key}>
+                        <path
+                            d={d}
+                            fill="none"
+                            stroke={grad}
+                            strokeOpacity="0.12"
+                            strokeWidth="8"
+                            vectorEffect="non-scaling-stroke"
+                        />
+                        <path
+                            d={d}
+                            fill="none"
+                            stroke={grad}
+                            strokeOpacity="0.5"
+                            strokeWidth="3"
+                            vectorEffect="non-scaling-stroke"
+                            className="flowmap-edge"
+                        />
+                    </g>
                 );
             })}
-            {flowPath && (
-                <>
-                    <path
-                        d={flowPath}
-                        fill="none"
-                        stroke={GOLD}
-                        strokeOpacity="0.1"
-                        strokeWidth="5"
-                        vectorEffect="non-scaling-stroke"
-                    />
-                    <path
-                        id="flowmap-flow-path"
-                        d={flowPath}
-                        fill="none"
-                        stroke={GOLD}
-                        strokeOpacity="0.55"
-                        strokeWidth="1.5"
-                        strokeDasharray="5 4"
-                        vectorEffect="non-scaling-stroke"
-                        markerEnd="url(#flow-arrow)"
-                        className="flowmap-dash"
-                    />
-                </>
-            )}
         </svg>
     );
 }
 
-/** Mobile fallback (<481px): the same nodes in a tidy two-column grid. */
-function MobileNodeGrid({ data }: { data: FlowMapData }) {
+/**
+ * Mobile fallback (<481px): the same nodes in a tidy two-column
+ * grid, with the desktop map's edges listed under it as compact text
+ * arrows (strongest flow first, at most 4) - no particles here.
+ */
+function MobileNodeGrid({ data, edges }: { data: FlowMapData; edges: FlowEdge[] }) {
     const byGroup = (group: FlowAsset['group']) => data.assets.filter(a => a.group === group);
     const Column = ({ title, assets }: { title: string; assets: FlowAsset[] }) => (
         <div>
@@ -445,6 +547,10 @@ function MobileNodeGrid({ data }: { data: FlowMapData }) {
         </div>
     );
 
+    const topFlows = [...edges]
+        .sort((a, b) => (b.to.zScore ?? 0) - (b.from.zScore ?? 0) - ((a.to.zScore ?? 0) - (a.from.zScore ?? 0)))
+        .slice(0, 4);
+
     return (
         <div className="p-4">
             <div className="grid grid-cols-2 gap-4">
@@ -454,12 +560,20 @@ function MobileNodeGrid({ data }: { data: FlowMapData }) {
             <div className="mt-5 flex justify-center">
                 <FedFace fed={data.fed} />
             </div>
-            {data.flowSummary && (
-                <p className="mt-5 text-center font-mono text-[11px] text-white/70">
-                    <span style={{ color: RED }}>{data.flowSummary.outflowName}</span>
-                    {' → '}
-                    <span style={{ color: GREEN }}>{data.flowSummary.inflowName}</span>
-                </p>
+            {topFlows.length > 0 && (
+                <div className="mt-5 space-y-1.5 text-center font-mono text-[11px] text-white/70">
+                    {topFlows.map(edge => (
+                        <p key={edge.key}>
+                            <span style={{ color: zColor(edge.from.zScore ?? 0) }}>
+                                {edge.from.name}
+                            </span>
+                            {' → '}
+                            <span style={{ color: zColor(edge.to.zScore ?? 0) }}>
+                                {edge.to.name}
+                            </span>
+                        </p>
+                    ))}
+                </div>
             )}
         </div>
     );
@@ -606,7 +720,7 @@ export function FlowMapClient({ initialData }: { initialData: FlowMapData }) {
     const vix = data.assets.find(a => a.id === 'vix');
     const dollar = data.assets.find(a => a.id === 'dollar');
     const mapAssets = data.assets.filter(a => NODE_POSITIONS[a.id]);
-    const flow = flowEndpoints(data);
+    const edges = computeFlowEdges(data.assets);
 
     const panelShadow = 'shadow-[0_20px_45px_-24px_rgba(0,0,0,0.9)]';
 
@@ -623,39 +737,6 @@ export function FlowMapClient({ initialData }: { initialData: FlowMapData }) {
                 .flowmap-ticker-wrap:hover .flowmap-ticker {
                     animation-play-state: paused;
                 }
-                @keyframes flowmap-dashmove {
-                    to { stroke-dashoffset: -18; }
-                }
-                .flowmap-dash {
-                    animation: flowmap-dashmove 1.6s linear infinite;
-                }
-                @keyframes flowmap-linkdrift {
-                    to { stroke-dashoffset: -14; }
-                }
-                .flowmap-link {
-                    animation: flowmap-linkdrift 5s linear infinite;
-                }
-                @keyframes flowmap-ring {
-                    0% { transform: scale(1); opacity: var(--fm-ring-o, 0.4); }
-                    100% { transform: scale(1.5); opacity: 0; }
-                }
-                .flowmap-ring {
-                    animation: flowmap-ring var(--fm-dur, 3s) cubic-bezier(0.2, 0.6, 0.35, 1) infinite;
-                    will-change: transform, opacity;
-                }
-                @keyframes flowmap-breathe {
-                    0%, 100% {
-                        box-shadow: 0 10px 24px -12px rgba(0, 0, 0, 0.9),
-                            0 0 12px -2px var(--fm-glow), inset 0 0 16px -6px var(--fm-glow);
-                    }
-                    50% {
-                        box-shadow: 0 10px 24px -12px rgba(0, 0, 0, 0.9),
-                            0 0 30px 0 var(--fm-glow), inset 0 0 22px -4px var(--fm-glow);
-                    }
-                }
-                .flowmap-node {
-                    animation: flowmap-breathe var(--fm-dur, 3s) ease-in-out infinite;
-                }
                 @keyframes flowmap-fadein {
                     from { opacity: 0; }
                     to { opacity: 1; }
@@ -663,19 +744,22 @@ export function FlowMapClient({ initialData }: { initialData: FlowMapData }) {
                 .flowmap-value {
                     animation: flowmap-fadein 0.6s ease both;
                 }
-                .flowmap-particle {
+                /* His dots: small plain white circles riding the ribbons.
+                   Positioned by the rAF loop in FlowDots; no CSS motion,
+                   so prefers-reduced-motion only needs the loop stopped
+                   (handled there) plus the ticker/fades below. */
+                .flowmap-dot {
                     position: absolute;
-                    width: 7px;
-                    height: 7px;
+                    width: 5px;
+                    height: 5px;
                     border-radius: 9999px;
-                    background: radial-gradient(circle, #f3d27a 0%, ${GOLD} 55%, rgba(212, 175, 55, 0) 100%);
-                    box-shadow: 0 0 10px 2px rgba(212, 175, 55, 0.55);
+                    background: #ffffff;
+                    box-shadow: 0 0 6px 1px rgba(255, 255, 255, 0.75);
                     transform: translate(-50%, -50%);
-                    will-change: left, top, opacity;
+                    will-change: left, top;
                 }
                 @media (prefers-reduced-motion: reduce) {
-                    .flowmap-ticker, .flowmap-dash, .flowmap-link,
-                    .flowmap-ring, .flowmap-node, .flowmap-value {
+                    .flowmap-ticker, .flowmap-value {
                         animation: none !important;
                     }
                 }
@@ -706,8 +790,8 @@ export function FlowMapClient({ initialData }: { initialData: FlowMapData }) {
                                 'radial-gradient(ellipse at 28% 18%, rgba(255,255,255,0.03), transparent 55%), radial-gradient(ellipse at 76% 82%, rgba(212,175,55,0.045), transparent 52%)'
                         }}
                     >
-                        <MapLinks flow={flow} assets={data.assets} />
-                        {flow && <FlowParticles from={flow.from} to={flow.to} />}
+                        <MapEdges edges={edges} />
+                        <FlowDots edges={edges} />
                         {mapAssets.map(asset => (
                             <MapNode key={asset.id} asset={asset} />
                         ))}
@@ -722,7 +806,7 @@ export function FlowMapClient({ initialData }: { initialData: FlowMapData }) {
 
                     {/* Narrow screens: two-column node grid */}
                     <div className="min-[481px]:hidden">
-                        <MobileNodeGrid data={data} />
+                        <MobileNodeGrid data={data} edges={edges} />
                     </div>
                 </div>
 
