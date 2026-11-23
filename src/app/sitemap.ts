@@ -14,6 +14,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
         '/money-rotation',
         '/on-chain',
         '/gold',
+        '/flow-map',
         '/completed',
         '/coins'
     ].map(route => ({

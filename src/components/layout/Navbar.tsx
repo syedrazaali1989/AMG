@@ -44,6 +44,7 @@ export function Navbar() {
         { href: '/money-rotation', label: 'Money Rotation 🔄' },
         { href: '/on-chain', label: 'On-Chain 🐋' },
         { href: '/gold', label: 'Gold 🥇' },
+        { href: '/flow-map', label: 'Flow Map' },
         { href: '/coins', label: 'Coins' },
         { href: '/completed', label: 'Completed Signals' },
     ];
