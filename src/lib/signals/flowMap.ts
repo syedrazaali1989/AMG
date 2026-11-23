@@ -25,6 +25,11 @@
  * stablecoin supply) and a z-score: how unusual the latest daily
  * return is versus the trailing 90 daily returns, in standard
  * deviations (shown as σ on the page).
+ *
+ * The snapshot also carries a short plain-language summary (English +
+ * Roman Urdu) generated from these same computed values - page text
+ * the user explicitly ordered so a first-time reader can understand
+ * what the map is saying.
  */
 
 import { BinanceAPI } from './binanceAPI';
@@ -61,11 +66,19 @@ export interface FlowSummary {
     outflowZ: number;
 }
 
+/** Plain-language summary of the whole map, same meaning in both languages. */
+export interface FlowTextSummary {
+    en: string;
+    ur: string;
+}
+
 export interface FlowMapData {
     assets: FlowAsset[];
     /** -100 (extreme risk-off) .. +100 (extreme risk-on); null if too few assets are live. */
     riskMeter: { score: number; label: 'RISK-ON' | 'RISK-OFF' | 'NEUTRAL' } | null;
     flowSummary: FlowSummary | null;
+    /** Plain-language summary (EN + Roman Urdu); null when the flow/meter inputs are missing. */
+    summary: FlowTextSummary | null;
     fed: FedDecision | null;
     /** Unix ms when this snapshot was computed. */
     updatedAt: number;
@@ -281,6 +294,87 @@ function nextFedDecision(nowMs: number): FedDecision | null {
 }
 
 // ---------------------------------------------------------------------------
+// Plain-language summary - 2-3 short sentences generated from the values
+// computed above, so a first-time reader understands the whole map:
+// where the money is going, what mood the meter is in, and what that
+// mood usually means next. The last part is TENDENCY language only -
+// it never promises a move. English and Roman Urdu say the same thing;
+// asset names stay in English in both, as the page itself shows them.
+// ---------------------------------------------------------------------------
+
+function buildFlowSummary(
+    flow: FlowSummary | null,
+    meter: FlowMapData['riskMeter'],
+    fed: FedDecision | null,
+    nowMs: number
+): FlowTextSummary | null {
+    if (!flow || !meter) return null;
+
+    const score = meter.score > 0 ? `+${meter.score}` : `${meter.score}`;
+
+    const en: string[] = [
+        `Money is leaving ${flow.outflowName} and moving into ${flow.inflowName}.`
+    ];
+    const ur: string[] = [
+        `Paisa ${flow.outflowName} se nikal kar ${flow.inflowName} ki taraf ja raha hai.`
+    ];
+
+    if (meter.label === 'RISK-OFF') {
+        en.push(
+            `The market is in fear mode (Risk-Off ${score}), so traders are protecting money instead of taking risk.`
+        );
+        ur.push(
+            `Market mein khauf hai (Risk-Off ${score}), log risk lene ke bajaye paisa mehfooz kar rahe hain.`
+        );
+        en.push(
+            'While this mood lasts, risky assets like crypto usually stay under pressure; a turn back toward Risk-On would be the first sign of money coming back.'
+        );
+        ur.push(
+            'Jab tak yeh mood rahe, crypto jaisi risky cheezon par dabao reh sakta hai; Risk-On ki taraf palatna paisa wapas aane ki pehli nishani hogi.'
+        );
+    } else if (meter.label === 'RISK-ON') {
+        en.push(
+            `The market is in confidence mode (Risk-On ${score}), so traders are taking risk and money is moving into risky assets.`
+        );
+        ur.push(
+            `Market mein aitmaad hai (Risk-On ${score}), log risk le rahe hain, paisa risky cheezon mein aa raha hai.`
+        );
+        en.push(
+            'While this mood lasts, risky assets like crypto usually keep getting support; a turn back toward Risk-Off would be the first sign of money leaving.'
+        );
+        ur.push(
+            'Jab tak yeh mood rahe, crypto jaisi risky cheezon ko sahara milta reh sakta hai; Risk-Off ki taraf palatna paisa nikalne ki pehli nishani hogi.'
+        );
+    } else {
+        en.push(
+            `The market is not leaning either way yet (Neutral ${score}), so money is waiting on the sidelines.`
+        );
+        ur.push(
+            `Market abhi kisi ek taraf nahi hai (Neutral ${score}), paisa kinare par intezaar mein hai.`
+        );
+        en.push(
+            'Until the meter clearly turns one way, moves can stay choppy and short-lived in both directions.'
+        );
+        ur.push(
+            'Jab tak meter saaf tor par ek taraf na palte, harkat dono taraf tez aur chhoti reh sakti hai.'
+        );
+    }
+
+    // A Fed decision within 3 days can override everything else on the
+    // map, so it earns a caution sentence in both languages.
+    if (fed && new Date(fed.date).getTime() - nowMs <= 3 * 86_400_000) {
+        en.push(
+            `The Fed decision on ${fed.label} can move every market on this map within minutes.`
+        );
+        ur.push(
+            `Fed ka faisla ${fed.label} ko hai, woh is map ki har market ko chand minute mein hila sakta hai.`
+        );
+    }
+
+    return { en: en.join(' '), ur: ur.join(' ') };
+}
+
+// ---------------------------------------------------------------------------
 // Assembly (5-minute server-side cache, mirroring /api/candles)
 // ---------------------------------------------------------------------------
 
@@ -347,11 +441,14 @@ export async function getFlowMap(): Promise<FlowMapData> {
         };
     }
 
+    const fed = nextFedDecision(Date.now());
+
     const data: FlowMapData = {
         assets,
         riskMeter,
         flowSummary,
-        fed: nextFedDecision(Date.now()),
+        summary: buildFlowSummary(flowSummary, riskMeter, fed, Date.now()),
+        fed,
         updatedAt: Date.now()
     };
 
