@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { Moon, Sun, Menu, X } from 'lucide-react';
 import { useState, useEffect } from 'react';
+import { PushNotificationsToggle } from '@/components/ui/PushNotificationsToggle';
 
 export function Navbar() {
     const [isDark, setIsDark] = useState(true);
@@ -74,6 +75,8 @@ export function Navbar() {
                     </div>
 
                     <div className="flex items-center gap-3">
+                        <PushNotificationsToggle />
+
                         <button
                             onClick={toggleTheme}
                             className="p-2 rounded-lg hover:bg-muted/50 transition-colors text-[#D4AF37]"
