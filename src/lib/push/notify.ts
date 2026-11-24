@@ -11,6 +11,9 @@ import {
     listSubscriptions,
     removeSubscription
 } from './store';
+import { resolveHistory, recordStandardSignals, type HistorySyncSummary } from '@/lib/history/sync';
+import { countActive, getHistoryRedis } from '@/lib/history/store';
+import type { ResolveSummary } from '@/lib/history/resolve';
 
 /**
  * New-signal watcher for Web Push notifications.
@@ -44,6 +47,9 @@ export interface PushCandidate {
     title: string;
     body: string;
     url: string;
+    /** Standard-engine signals carry their source signal + bar anchor for history. */
+    signal?: Signal;
+    anchorMs?: number;
 }
 
 export interface CheckSummary {
@@ -52,6 +58,8 @@ export interface CheckSummary {
     newCount: number;
     sent: number;
     removedSubscriptions: number;
+    /** Server-side signal-history sync for this pass (standard + on-chain). */
+    history?: HistorySyncSummary;
 }
 
 function formatPrice(value: number): string {
@@ -59,13 +67,15 @@ function formatPrice(value: number): string {
     return String(parseFloat(value.toFixed(8)));
 }
 
-function toCandidate(engine: string, url: string, signal: Signal, issuedAnchor: string): PushCandidate {
+function toCandidate(engine: string, url: string, signal: Signal, issuedAnchor: string, anchorMs?: number): PushCandidate {
     const tp1 = signal.takeProfit1 ?? signal.takeProfit;
     return {
         id: `${engine}:${signal.pair}:${signal.direction}:${issuedAnchor}`,
         title: `New Signal: ${signal.pair} ${signal.direction}`,
         body: `Entry ${formatPrice(signal.entryPrice)} · SL ${formatPrice(signal.stopLoss)} · TP1 ${formatPrice(tp1)}`,
-        url
+        url,
+        signal,
+        anchorMs
     };
 }
 
@@ -94,7 +104,7 @@ export async function collectCurrentCandidates(): Promise<PushCandidate[]> {
         for (const signal of standard.value.signals) {
             const anchorMs = standard.value.barAnchors.get(signal.pair);
             const issued = anchorMs ? new Date(anchorMs).toISOString() : new Date(signal.timestamp).toISOString();
-            candidates.push(toCandidate('standard', '/dashboard', signal, issued));
+            candidates.push(toCandidate('standard', '/dashboard', signal, issued, anchorMs));
         }
     }
     if (v2.status === 'fulfilled') {
@@ -115,16 +125,66 @@ export async function checkAndNotify(): Promise<CheckSummary> {
     const empty: CheckSummary = { configured: false, checked: 0, newCount: 0, sent: 0, removedSubscriptions: 0 };
 
     const redis = getPushRedis();
-    const publicKey = getVapidPublicKey();
-    const privateKey = getVapidPrivateKey();
-    if (!redis || !publicKey || !privateKey) {
+    if (!redis) {
         return empty;
     }
 
-    webpush.setVapidDetails(getVapidSubject(), publicKey, privateKey);
+    // Server-side signal history. ORDER MATTERS (see resolveHistory):
+    // resolve stale actives FIRST, while the Binance IP is still fresh,
+    // THEN evaluate the engines (whose ~80-request burst trips the
+    // 418 rate-limit), THEN record the current standard signals
+    // (Redis only, no market-data fetch). History needs Redis only, NOT
+    // VAPID keys: it keeps working even when push itself is not
+    // configured. Fully guarded - a history failure never breaks the
+    // notification check below.
+    let resolveSummary: ResolveSummary | null = null;
+    try {
+        resolveSummary = await resolveHistory();
+    } catch {
+        resolveSummary = null;
+    }
 
     const candidates = await collectCurrentCandidates();
     const now = Date.now();
+
+    let recorded = 0;
+    try {
+        const standardSignals = candidates
+            .filter(c => c.id.startsWith('standard:') && c.signal && c.anchorMs !== undefined)
+            .map(c => c.signal as Signal);
+        const barAnchors = new Map<string, number>();
+        for (const c of candidates) {
+            if (c.id.startsWith('standard:') && c.signal && c.anchorMs !== undefined) {
+                barAnchors.set(c.signal.pair, c.anchorMs);
+            }
+        }
+        recorded = await recordStandardSignals(standardSignals, barAnchors);
+    } catch {
+        recorded = 0;
+    }
+
+    let history: HistorySyncSummary | undefined;
+    if (resolveSummary) {
+        const hRedis = getHistoryRedis();
+        const active = hRedis ? await countActive(hRedis).catch(() => 0) : 0;
+        history = {
+            configured: true,
+            recorded,
+            resolved: resolveSummary.resolved,
+            wins: resolveSummary.wins,
+            losses: resolveSummary.losses,
+            expired: resolveSummary.expired,
+            active
+        };
+    }
+
+    const publicKey = getVapidPublicKey();
+    const privateKey = getVapidPrivateKey();
+    if (!publicKey || !privateKey) {
+        return { ...empty, checked: candidates.length, history };
+    }
+
+    webpush.setVapidDetails(getVapidSubject(), publicKey, privateKey);
 
     // Prune notified ids older than 72h, then load what is still known.
     await redis.zremrangebyscore(NOTIFIED_KEY, 0, now - NOTIFIED_TTL_MS);
@@ -182,7 +242,8 @@ export async function checkAndNotify(): Promise<CheckSummary> {
         checked: candidates.length,
         newCount: fresh.length,
         sent,
-        removedSubscriptions
+        removedSubscriptions,
+        history
     };
 }
 

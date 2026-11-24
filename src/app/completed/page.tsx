@@ -19,62 +19,78 @@ export default function CompletedSignalsPage() {
     useEffect(() => {
         if (!mounted) return;
 
-        // Load completed signals from localStorage
+        // Dedupe by ID, backfill display-only TP levels, sort by completion.
+        const normalize = (signals: any[]) => {
+            const uniqueSignalsMap = new Map<string, any>();
+            signals.forEach((signal: any) => {
+                uniqueSignalsMap.set(signal.id, signal);
+            });
+            const uniqueSignals = Array.from(uniqueSignalsMap.values());
+            const migratedSignals = uniqueSignals.map((signal: any, index: number) => {
+                // Backfill missing partial-TP LEVELS for display only.
+                // Hit flags are NEVER fabricated: a stored record's
+                // tp1Hit/tp2Hit/tp3Hit are shown exactly as recorded.
+                if (!signal.takeProfit1 || !signal.takeProfit2 || !signal.takeProfit3) {
+                    const isBuyOrLong = signal.direction === 'BUY' || signal.direction === 'LONG';
+                    if (isBuyOrLong) {
+                        const tpDistance = signal.takeProfit - signal.entryPrice;
+                        signal.takeProfit1 = signal.entryPrice + (tpDistance * 0.30);
+                        signal.takeProfit2 = signal.entryPrice + (tpDistance * 0.60);
+                        signal.takeProfit3 = signal.takeProfit;
+                    } else {
+                        const tpDistance = signal.entryPrice - signal.takeProfit;
+                        signal.takeProfit1 = signal.entryPrice - (tpDistance * 0.30);
+                        signal.takeProfit2 = signal.entryPrice - (tpDistance * 0.60);
+                        signal.takeProfit3 = signal.takeProfit;
+                    }
+                }
+
+                // Generate unique key (deterministic to avoid hydration mismatch)
+                const timestamp = signal.completedAt || new Date().toISOString();
+                signal.uniqueKey = `signal-${signal.id}-${index}-${timestamp.replace(/[:.]/g, '')}`;
+
+                return signal;
+            });
+
+            // Sort by completion date
+            migratedSignals.sort((a: any, b: any) => {
+                const dateA = new Date(a.completedAt || 0).getTime();
+                const dateB = new Date(b.completedAt || 0).getTime();
+                return dateB - dateA;
+            });
+            return migratedSignals;
+        };
+
+        // Load completed signals from localStorage (this browser only)
+        let localSignals: any[] = [];
         const saved = localStorage.getItem('completedSignals');
         if (saved) {
             try {
                 const signals = JSON.parse(saved);
-
-                // Deduplicate signals by ID using Map
-                const uniqueSignalsMap = new Map<string, any>();
-                signals.forEach((signal: any) => {
-                    uniqueSignalsMap.set(signal.id, signal);
-                });
-
-                // Convert Map back to array
-                const uniqueSignals = Array.from(uniqueSignalsMap.values());
-
-                // Migrate and add unique keys
-                const migratedSignals = uniqueSignals.map((signal: any, index: number) => {
-                    // Backfill missing partial-TP LEVELS for display only.
-                    // Hit flags are NEVER fabricated: a stored record's
-                    // tp1Hit/tp2Hit/tp3Hit are shown exactly as recorded.
-                    if (!signal.takeProfit1 || !signal.takeProfit2 || !signal.takeProfit3) {
-                        const isBuyOrLong = signal.direction === 'BUY' || signal.direction === 'LONG';
-                        if (isBuyOrLong) {
-                            const tpDistance = signal.takeProfit - signal.entryPrice;
-                            signal.takeProfit1 = signal.entryPrice + (tpDistance * 0.30);
-                            signal.takeProfit2 = signal.entryPrice + (tpDistance * 0.60);
-                            signal.takeProfit3 = signal.takeProfit;
-                        } else {
-                            const tpDistance = signal.entryPrice - signal.takeProfit;
-                            signal.takeProfit1 = signal.entryPrice - (tpDistance * 0.30);
-                            signal.takeProfit2 = signal.entryPrice - (tpDistance * 0.60);
-                            signal.takeProfit3 = signal.takeProfit;
-                        }
-                    }
-
-                    // Generate unique key (deterministic to avoid hydration mismatch)
-                    const timestamp = signal.completedAt || new Date().toISOString();
-                    signal.uniqueKey = `signal-${signal.id}-${index}-${timestamp.replace(/[:.]/g, '')}`;
-
-                    return signal;
-                });
-
-                // Sort by completion date
-                migratedSignals.sort((a: any, b: any) => {
-                    const dateA = new Date(a.completedAt || 0).getTime();
-                    const dateB = new Date(b.completedAt || 0).getTime();
-                    return dateB - dateA;
-                });
-
-                setCompletedSignals(migratedSignals);
-                localStorage.setItem('completedSignals', JSON.stringify(migratedSignals));
+                localSignals = normalize(signals);
+                setCompletedSignals(localSignals);
+                localStorage.setItem('completedSignals', JSON.stringify(localSignals));
             } catch (error) {
                 console.error('Error loading completed signals:', error);
                 setCompletedSignals([]);
             }
         }
+
+        // Merge the server-side history (every visitor, recorded on the
+        // server): server records win on id conflict; local-only entries
+        // are kept. The merged list is shown only - it is never written
+        // back to localStorage. A failed fetch leaves local entries alone.
+        fetch('/api/history')
+            .then(res => (res.ok ? res.json() : null))
+            .then(data => {
+                const serverSignals = data && Array.isArray(data.signals) ? data.signals : [];
+                if (serverSignals.length === 0) return;
+                const merged = new Map<string, any>();
+                for (const s of localSignals) merged.set(s.id, s);
+                for (const s of serverSignals) merged.set(s.id, s);
+                setCompletedSignals(normalize(Array.from(merged.values())));
+            })
+            .catch(() => undefined);
     }, [mounted]);
 
     // Filter signals based on active filter
