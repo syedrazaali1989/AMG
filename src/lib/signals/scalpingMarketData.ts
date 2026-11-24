@@ -13,12 +13,30 @@ export class ScalpingMarketData {
      * @param pair Trading pair (e.g., 'BTC/USDT')
      * @param marketType CRYPTO or FOREX
      * @param candleCount Number of 5-min candles (default 48 = 4 hours)
+     * @param strict When true (server route), live data is mandatory:
+     *   a failed or stale live fetch THROWS instead of falling back to
+     *   simulated data, and FOREX (which has no live 5m source - the
+     *   Exness feed is simulated) always throws. Signals must never be
+     *   generated from simulated prices.
      */
-    static async generateScalpingData(pair: string, marketType: MarketType, candleCount: number = 48) {
+    static async generateScalpingData(pair: string, marketType: MarketType, candleCount: number = 48, strict = false) {
         // Try to fetch real Binance data for crypto pairs
         if (marketType === MarketType.CRYPTO) {
             try {
                 const binanceData = await BinanceAPI.getScalpingMarketData(pair);
+
+                if (strict) {
+                    // Freshness gate: the last candle must be recent.
+                    // A frozen/delisted series (e.g. FTM spot, frozen at
+                    // Jan 2025) would otherwise produce signals on
+                    // months-old prices. 5m candles: the last closed
+                    // candle is at most ~10 minutes old in normal operation.
+                    const lastTs = binanceData.timestamps[binanceData.timestamps.length - 1];
+                    const lastMs = lastTs instanceof Date ? lastTs.getTime() : Number(lastTs);
+                    if (!Number.isFinite(lastMs) || Date.now() - lastMs > 30 * 60 * 1000) {
+                        throw new Error(`Stale market data for ${pair}`);
+                    }
+                }
 
                 return {
                     pair,
@@ -31,12 +49,19 @@ export class ScalpingMarketData {
                     currentPrice: binanceData.currentPrice
                 };
             } catch (error) {
+                if (strict) throw error;
                 // Gracefully fall back to simulated data
                 if (process.env.NODE_ENV === 'development') {
                     console.info(`📊 Binance API unavailable for ${pair} (scalping) - using simulated data`);
                 }
                 // Continue to simulated data generation below
             }
+        }
+
+        // Forex has no live 5-minute data source (the Exness feed below
+        // is simulated), so strict mode refuses it outright.
+        if (strict) {
+            throw new Error(`No live market data source for ${pair}`);
         }
 
         // Try to fetch Exness-compatible data for Forex pairs

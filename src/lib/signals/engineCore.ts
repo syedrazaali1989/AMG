@@ -90,7 +90,6 @@ export interface SignalCoreResult {
 const BUY_THRESHOLD = 58;
 const SELL_THRESHOLD = 58;
 const COUNTER_TREND_MIN_CONFIDENCE = 70;
-const SPOT_MIN_CONFIDENCE = 58;
 const FUTURES_MIN_CONFIDENCE = 58;
 
 // Quality-filter constants
@@ -310,27 +309,23 @@ export function evaluateSignalCore(
     const hasPullback = pullbackPercent >= 0.5 && pullbackPercent <= 1.5;
 
     if (buyScore >= BUY_THRESHOLD && buyScore > sellScore) {
-        // LONG/BUY signals require pullback confirmation
+        // LONG signals require pullback confirmation
         if (hasPullback) {
-            direction = signalType === SignalType.FUTURE ? SignalDirection.LONG : SignalDirection.BUY;
+            direction = SignalDirection.LONG;
             technicalConfidence = Math.min(buyScore, 100);
         } else {
             // Skip signal - price at or near local top
             return null;
         }
     } else if (sellScore >= SELL_THRESHOLD && sellScore > buyScore) {
-        // SPOT: Skip SELL signals (only BUY makes sense in spot trading)
-        if (signalType === SignalType.SPOT) {
-            return null; // No SELL signals for SPOT
-        }
-        direction = signalType === SignalType.FUTURE ? SignalDirection.SHORT : SignalDirection.SELL;
+        direction = SignalDirection.SHORT;
         technicalConfidence = Math.min(sellScore, 100);
     }
 
     // No signal if not strong enough
     if (!direction) return null;
 
-    const isLong = direction === SignalDirection.BUY || direction === SignalDirection.LONG;
+    const isLong = direction === SignalDirection.LONG;
 
     // Generate advanced market analysis (used for the counter-trend gate
     // here, and for display fields by the caller)
@@ -353,7 +348,7 @@ export function evaluateSignalCore(
     }
 
     // Profile-based confidence threshold (technical score only)
-    const minConfidence = signalType === SignalType.SPOT ? SPOT_MIN_CONFIDENCE : FUTURES_MIN_CONFIDENCE;
+    const minConfidence = FUTURES_MIN_CONFIDENCE;
     if (confidence < minConfidence) {
         return null; // Signal doesn't meet quality threshold for this type
     }

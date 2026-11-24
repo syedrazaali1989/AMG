@@ -23,7 +23,9 @@ export default function DashboardPage() {
     const [loadingProgress, setLoadingProgress] = useState(0); // 0-100
     const [loadingStatus, setLoadingStatus] = useState('Initializing...'); // Status message
     const [selectedMarket, setSelectedMarket] = useState<'CRYPTO' | 'FOREX' | null>(null);
-    const [selectedType, setSelectedType] = useState<'SPOT' | 'FUTURE' | null>(null);
+    // Futures only: the site serves no spot signals, so there is no
+    // type selector. CRYPTO selection sets this to FUTURE directly.
+    const [selectedType, setSelectedType] = useState<'FUTURE' | null>(null);
     const [autoGenEnabled, setAutoGenEnabled] = useState(false);
 
     // Auto-migrate old signals to new SignalManager format
@@ -59,8 +61,8 @@ const [selectedDirections, setSelectedDirections] = useState<SignalDirection[]>(
         const saved = localStorage.getItem('selectedDirections');
         if (saved) return JSON.parse(saved) as SignalDirection[];
     }
-    // Default: BUY for SPOT, LONG/SHORT for FUTURE
-    return [SignalDirection.BUY];
+    // Default: LONG/SHORT for FUTURE
+    return [SignalDirection.LONG, SignalDirection.SHORT];
 });
 const [selectedConfidence, setSelectedConfidence] = useState<ConfidenceLevel>(() => {
     if (typeof window !== 'undefined') {
@@ -99,14 +101,9 @@ useEffect(() => {
 }, []);
 
 // Auto-adjust selected directions when signal type changes
+// (Futures only: LONG and SHORT.)
 useEffect(() => {
-    if (selectedType === 'SPOT') {
-        // SPOT: Only BUY available
-        setSelectedDirections([SignalDirection.BUY]);
-    } else {
-        // FUTURE: LONG and SHORT available
-        setSelectedDirections([SignalDirection.LONG, SignalDirection.SHORT]);
-    }
+    setSelectedDirections([SignalDirection.LONG, SignalDirection.SHORT]);
 }, [selectedType]);
 
 // Check auto-generation status
@@ -305,7 +302,7 @@ const generateSignals = async () => {
         // Signals are generated server-side (/api/signals) from live Binance
         // data so every visitor sees the same signals. If live data cannot
         // be loaded, NO signals are shown - never simulated ones.
-        const response = await fetch(`/api/signals?market=${selectedMarket}&type=${selectedType}`);
+        const response = await fetch(`/api/signals?market=${selectedMarket}`);
 
         if (!response.ok) {
             throw new Error(`Signals request failed: ${response.status}`);
@@ -348,9 +345,9 @@ const generateSignals = async () => {
 };
 
 
-// Filter signals by selected type for accurate stats
+// Filter signals by selected type for accurate stats (futures only)
 const signalsForStats = selectedType ? signals.filter(signal =>
-    selectedType === 'SPOT' ? signal.signalType === SignalType.SPOT : signal.signalType === SignalType.FUTURE
+    signal.signalType === SignalType.FUTURE
 ) : [];
 
 // Apply direction filter to stats as well (so Total Signals reflects filter)
@@ -371,7 +368,7 @@ return (
                             <button
                                 onClick={() => {
                                     setSelectedMarket('CRYPTO');
-                                    setSelectedType(null);
+                                    setSelectedType('FUTURE');
                                     setSignals([]);
                                     setIsLoading(false);
                                 }}
@@ -381,55 +378,6 @@ return (
                             </button>
                         </div>
                     </div>
-
-                    {/* Step 2: Select Trading Type (Only for Cryptocurrency) */}
-                    {selectedMarket === 'CRYPTO' && (
-                        <motion.div
-                            initial={{ opacity: 0, y: -10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ duration: 0.3 }}
-                        >
-                            <p className="text-sm text-muted-foreground mb-2">Step 2: Select Trading Type</p>
-                            <div className="flex gap-2 glass rounded-lg p-1 w-fit">
-                                <button
-                                    onClick={() => {
-                                        setSelectedType('SPOT');
-                                        setSignals([]);
-                                        setIsLoading(false);
-                                        // Load signals after selection
-                                        setTimeout(() => {
-                                            generateSignals();
-                                            showInfo('CRYPTO SPOT Signals', 'Viewing live server-generated signals');
-                                        }, 100);
-                                    }}
-                                    className={`px-6 py-3 rounded-lg font-bold transition-all ${selectedType === 'SPOT'
-                                        ? 'bg-gradient-primary text-white shadow-lg'
-                                        : 'text-muted-foreground hover:text-foreground'
-                                        }`}
-                                >
-                                    Spot Trading
-                                </button>
-                                <button
-                                    onClick={() => {
-                                        setSelectedType('FUTURE');
-                                        setSignals([]);
-                                        setIsLoading(false);
-                                        // Load signals after selection
-                                        setTimeout(() => {
-                                            generateSignals();
-                                            showInfo('CRYPTO FUTURE Signals', 'Viewing live server-generated signals');
-                                        }, 100);
-                                    }}
-                                    className={`px-6 py-3 rounded-lg font-bold transition-all ${selectedType === 'FUTURE'
-                                        ? 'bg-gradient-primary text-white shadow-lg'
-                                        : 'text-muted-foreground hover:text-foreground'
-                                        }`}
-                                >
-                                    Future Trading
-                                </button>
-                            </div>
-                        </motion.div>
-                    )}
                 </div>
             </motion.div>
 
@@ -456,13 +404,6 @@ return (
                     <div className="space-y-4">
                         <div className="text-2xl font-bold text-gradient">Welcome to AMG Trading</div>
                         <div className="text-muted-foreground">Please select a market to get started</div>
-                    </div>
-                </div>
-            ) : selectedMarket === 'CRYPTO' && !selectedType ? (
-                <div className="glass rounded-lg p-12 text-center">
-                    <div className="space-y-4">
-                        <div className="text-2xl font-bold text-gradient">Cryptocurrency Selected</div>
-                        <div className="text-muted-foreground">Please select Spot or Future trading to continue</div>
                     </div>
                 </div>
             ) : isLoading ? (
@@ -575,7 +516,6 @@ return (
                                 <SignalDirectionFilter
                                     selectedDirections={selectedDirections}
                                     onDirectionsChange={setSelectedDirections}
-                                    signalType={selectedType}
                                 />
                             )}
                         </div>

@@ -7,19 +7,16 @@ import { cn } from '@/lib/utils';
 interface SignalDirectionFilterProps {
     selectedDirections: SignalDirection[];
     onDirectionsChange: (directions: SignalDirection[]) => void;
-    signalType: 'SPOT' | 'FUTURE';
 }
 
-export function SignalDirectionFilter({ selectedDirections, onDirectionsChange, signalType }: SignalDirectionFilterProps) {
+export function SignalDirectionFilter({ selectedDirections, onDirectionsChange }: SignalDirectionFilterProps) {
     const allDirections = [
-        { value: SignalDirection.BUY, label: 'BUY', color: 'text-success border-success/30 bg-success/10', type: 'SPOT' },
-        // SELL removed - SPOT only supports BUY (entry), sell happens automatically at TP
-        { value: SignalDirection.LONG, label: 'LONG', color: 'text-success border-success/30 bg-success/10', type: 'FUTURE' },
-        { value: SignalDirection.SHORT, label: 'SHORT', color: 'text-danger border-danger/30 bg-danger/10', type: 'FUTURE' },
+        { value: SignalDirection.LONG, label: 'LONG', color: 'text-success border-success/30 bg-success/10' },
+        { value: SignalDirection.SHORT, label: 'SHORT', color: 'text-danger border-danger/30 bg-danger/10' },
     ];
 
-    // Filter directions based on signal type
-    const directions = allDirections.filter(d => d.type === signalType);
+    // Futures only: LONG and SHORT. There is no spot/BUY direction.
+    const directions = allDirections;
 
     const toggleDirection = (direction: SignalDirection) => {
         if (selectedDirections.includes(direction)) {

@@ -1,16 +1,20 @@
-import { Signal, SignalType, MarketType } from '../signals/types';
+import { Signal } from '../signals/types';
 import { SignalManager } from './signalManager';
-import { ScalpingSignalGenerator } from '../signals/scalpingGenerator';
-import { MarketDataManager } from '../signals/marketData';
 
 /**
  * Auto Generator Service
- * Automatically generates signals on a schedule
+ * Automatically generates signals on a schedule.
+ *
+ * Futures only: the site serves no spot signals, so every config is
+ * FUTURE. Standard and on-chain signals are fetched from their
+ * server routes; scalping signals are fetched from
+ * /api/scalping/signals (server-side generation) - nothing is
+ * generated in the visitor's browser anymore.
  */
 
 export interface GenerationConfig {
     market: 'CRYPTO' | 'FOREX';
-    signalType: 'SPOT' | 'FUTURE';
+    signalType: 'FUTURE';
     enabled: boolean;
 }
 
@@ -141,7 +145,7 @@ export class AutoGenerator {
             return [];
         }
 
-        const response = await fetch(`/api/signals?market=CRYPTO&type=${config.signalType}`);
+        const response = await fetch(`/api/signals?market=CRYPTO`);
         if (!response.ok) {
             throw new Error(`Live signals unavailable (status ${response.status})`);
         }
@@ -151,20 +155,28 @@ export class AutoGenerator {
     }
 
     /**
-     * Generate scalping signals
+     * Generate scalping signals.
+     *
+     * Scalping signals are generated SERVER-SIDE by
+     * /api/scalping/signals (one shared engine instance against live
+     * Binance data) so every visitor sees the same signals. This method
+     * only fetches them. If live data is unavailable the API returns an
+     * error and no signals are produced - there is no client-side or
+     * simulated fallback.
      */
     private static async generateScalpingSignals(config: GenerationConfig): Promise<Signal[]> {
-        const allPairs = MarketDataManager.getAllPairs();
-        const filteredPairs = allPairs
-            .filter(({ marketType }) =>
-                config.market === 'CRYPTO' ? marketType === MarketType.CRYPTO : marketType === MarketType.FOREX
-            )
-            .sort(() => Math.random() - 0.5)
-            .slice(0, 30); // Random 30 pairs
+        if (config.market !== 'CRYPTO') {
+            console.warn('Scalping auto-generation is only available for CRYPTO (live data source)');
+            return [];
+        }
 
-        const signalType = config.signalType === 'SPOT' ? SignalType.SPOT : SignalType.FUTURE;
+        const response = await fetch('/api/scalping/signals?market=CRYPTO');
+        if (!response.ok) {
+            throw new Error(`Live scalping signals unavailable (status ${response.status})`);
+        }
 
-        return await ScalpingSignalGenerator.generateScalpingSignals(filteredPairs, signalType);
+        const data = await response.json();
+        return (data.signals || []) as Signal[];
     }
 
     /**

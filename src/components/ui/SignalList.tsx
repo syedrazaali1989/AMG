@@ -80,7 +80,6 @@ export function SignalList({ signals, onSignalClick, onFilterChange, showCharts 
                         className="px-4 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
                     >
                         <option value="ALL">All Types</option>
-                        <option value={SignalType.SPOT}>Spot</option>
                         <option value={SignalType.FUTURE}>Future</option>
                     </select>
                 </div>

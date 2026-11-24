@@ -18,13 +18,6 @@ import { SignalHelpers } from './signalHelpers';
 import { PredictionEngine } from '../ml/predictionEngine';
 import { MultiTimeframeAnalyzer } from '../timeframe/multiTimeframeAnalyzer';
 import { ExchangeAvailability } from './exchangeAvailability';
-import {
-    calculatePortfolioAllocation,
-    calculateHoldTime,
-    calculateVolumeQuality,
-    getCoinStability,
-    generateBeginnerTip
-} from './spotEnhancements';
 
 
 export class SignalGenerator {
@@ -39,15 +32,6 @@ export class SignalGenerator {
     // technical score of ~83-87 with neutral sentiment - unreachable in practice,
     // which made issuance depend on the (fabricated) news term instead.
     // 58 aligns the profile gate with the engine's own technical gate.
-    private static readonly SPOT_PROFILE = {
-        minConfidence: 58,        // SPOT: technical score >= 58
-        riskLevel: 'MODERATE' as const
-    };
-
-    private static readonly FUTURES_PROFILE = {
-        minConfidence: 58,        // FUTURES: technical score >= 58
-        riskLevel: 'HIGH' as const
-    };
 
     /**
      * Initialize prediction engine (call once on app start)
@@ -63,7 +47,8 @@ export class SignalGenerator {
      * Generate trading signal with news + technical confirmation
      * Enhanced with real-time news analysis
      * @param marketData Market data for analysis
-     * @param signalType Type of signal (SPOT/FUTURE)
+     * @param signalType Type of signal (FUTURE only - the site serves
+     * futures signals exclusively)
      * @param timeframe Candlestick timeframe for the signal
      * @returns Generated signal or null
      */
@@ -211,9 +196,9 @@ export class SignalGenerator {
         // Generate signal ID
         const id = `${pair.replace('/', '')}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-        // Set expiration (24 hours for spot, 48 hours for futures)
+        // Set expiration (48 hours for futures signals)
         const expiresAt = new Date();
-        expiresAt.setHours(expiresAt.getHours() + (signalType === SignalType.SPOT ? 24 : 48));
+        expiresAt.setHours(expiresAt.getHours() + 48);
 
         // Get relevant news and economic events
         const newsEvents = await NewsAnalyzer.getNewsSummary(pair);
@@ -299,22 +284,6 @@ export class SignalGenerator {
             rsi,
             macdValue: macd.macd,
             macdSignal: macd.signal,
-
-            // SPOT Signal Enhancements (only for SPOT signals)
-            ...(signalType === SignalType.SPOT ? {
-                riskLevel: this.SPOT_PROFILE.riskLevel,
-                portfolioAllocation: calculatePortfolioAllocation(confidence),
-                holdTimeRecommendation: calculateHoldTime(entryPrice, takeProfit3),
-                volumeQuality: calculateVolumeQuality(currentVolume, volumeAvg).score,
-                volumeQualityLabel: calculateVolumeQuality(currentVolume, volumeAvg).label,
-                coinStability: getCoinStability(pair).score,
-                coinStabilityLabel: getCoinStability(pair).label,
-                beginnerTip: generateBeginnerTip(
-                    direction === SignalDirection.BUY ? 'BUY' : 'SELL',
-                    rsi,
-                    sentimentScore.overall
-                )
-            } : {}),
 
             // Predictive AI Fields
             mlPrediction,
