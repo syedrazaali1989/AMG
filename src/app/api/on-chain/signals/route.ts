@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { OnChainSignalGenerator } from '@/lib/signals/onChainGenerator';
+import { syncOnChainHistory } from '@/lib/history/sync';
 
 export const dynamic = 'force-dynamic';
 
@@ -56,6 +57,12 @@ export async function GET() {
             cached: false
         };
         cache = { payload, timestamp: now };
+
+        // Server-side history: record this generation's signals
+        // (first-seen levels are canonical) and resolve stale on-chain
+        // actives against real klines. Fire-and-forget and fully
+        // guarded - it can never break or delay this response.
+        void syncOnChainHistory(report.signals).catch(() => undefined);
 
         return NextResponse.json(payload);
     } catch (error) {
