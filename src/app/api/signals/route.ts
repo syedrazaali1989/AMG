@@ -14,8 +14,10 @@ export const dynamic = 'force-dynamic';
  *
  * Query params:
  *   market=CRYPTO            (only CRYPTO is served; forex has no live source)
- *   type=SPOT|FUTURE         (default FUTURE)
  *   pairs=BTC/USDT,ETH/USDT  (optional, defaults to the standard scan list)
+ *
+ * Futures only: there is no type parameter and no SPOT path. The site
+ * serves futures signals exclusively.
  *
  * If live market data cannot be fetched at all, this returns 502 and the
  * dashboard shows a "live data unavailable" state - signals are NEVER
@@ -35,7 +37,6 @@ export async function GET(request: NextRequest) {
     try {
         const { searchParams } = new URL(request.url);
         const market = (searchParams.get('market') || 'CRYPTO').toUpperCase();
-        const typeParam = (searchParams.get('type') || 'FUTURE').toUpperCase();
 
         if (market !== 'CRYPTO') {
             return NextResponse.json(
@@ -44,14 +45,15 @@ export async function GET(request: NextRequest) {
             );
         }
 
-        const signalType = typeParam === 'SPOT' ? SignalType.SPOT : SignalType.FUTURE;
+        // Futures only - the site serves no spot signals.
+        const signalType = SignalType.FUTURE;
 
         const pairsParam = searchParams.get('pairs');
         const pairs = pairsParam
             ? pairsParam.split(',').map(p => p.trim()).filter(Boolean).slice(0, 30)
             : STANDARD_DEFAULT_PAIRS;
 
-        const cacheKey = `${market}|${signalType}|${pairs.join(',')}`;
+        const cacheKey = `${market}|${pairs.join(',')}`;
         const now = Date.now();
         const cached = signalCache.get(cacheKey);
         if (cached && now - cached.timestamp < CACHE_DURATION) {

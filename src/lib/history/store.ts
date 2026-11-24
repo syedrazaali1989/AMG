@@ -33,11 +33,13 @@ import type { Signal } from '@/lib/signals/types';
  * NO secret is ever stored here - records hold only public signal data.
  */
 
-export type HistoryEngine = 'standard' | 'onchain';
+export type HistoryEngine = 'standard' | 'onchain' | 'scalping';
 
 /** Engine token used inside stable history ids (see above). */
 export function historyEngineToken(engine: HistoryEngine): string {
-    return engine === 'onchain' ? 'ONCHAIN' : 'standard';
+    if (engine === 'onchain') return 'ONCHAIN';
+    if (engine === 'scalping') return 'scalping';
+    return 'standard';
 }
 
 export interface HistoryRecord {

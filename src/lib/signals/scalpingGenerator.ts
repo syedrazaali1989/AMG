@@ -8,19 +8,41 @@ import { ExchangeAvailability } from './exchangeAvailability';
  */
 export class ScalpingSignalGenerator {
     /**
-     * Generate scalping signals for multiple pairs
+     * Generate scalping signals for multiple pairs.
+     *
+     * Strict mode (server route): live data is mandatory. A pair whose
+     * live data cannot be fetched is SKIPPED, and if every pair fails
+     * the call throws so the route can answer an honest 502 - signals
+     * are never generated from simulated prices. In non-strict mode
+     * (legacy client path) the data layer keeps its old fallback.
      */
     static async generateScalpingSignals(
         pairs: Array<{ pair: string; marketType: MarketType }>,
-        signalType: SignalType
+        signalType: SignalType,
+        opts?: { strict?: boolean }
     ): Promise<Signal[]> {
         const signals: Signal[] = [];
+        let failedPairs = 0;
 
         for (const { pair, marketType } of pairs) {
-            const signal = await this.generateSingleScalpingSignal(pair, marketType, signalType);
-            if (signal) {
-                signals.push(signal);
+            try {
+                const signal = await this.generateSingleScalpingSignal(pair, marketType, signalType, opts?.strict ?? false);
+                if (signal) {
+                    signals.push(signal);
+                }
+            } catch (error) {
+                // Strict mode: count the failure and keep scanning the
+                // remaining pairs - one dead pair must not kill the scan.
+                if (opts?.strict) {
+                    failedPairs++;
+                    continue;
+                }
+                throw error;
             }
+        }
+
+        if (opts?.strict && failedPairs === pairs.length && pairs.length > 0) {
+            throw new Error('Live market data unavailable for all scalping pairs');
         }
 
         return signals.sort((a, b) => b.confidence - a.confidence);
@@ -32,10 +54,11 @@ export class ScalpingSignalGenerator {
     private static async generateSingleScalpingSignal(
         pair: string,
         marketType: MarketType,
-        signalType: SignalType
+        signalType: SignalType,
+        strict = false
     ): Promise<Signal | null> {
         // Get 5-minute candle data (now fetches real Binance prices)
-        const data = await ScalpingMarketData.generateScalpingData(pair, marketType, 48);
+        const data = await ScalpingMarketData.generateScalpingData(pair, marketType, 48, strict);
         const { prices, volumes } = data;
         const currentPrice = prices[prices.length - 1];
 
@@ -118,10 +141,9 @@ export class ScalpingSignalGenerator {
         let confidence = 0;
 
         if (buyScore >= MIN_SCORE && buyScore > sellScore) {
-            direction = signalType === SignalType.FUTURE ? SignalDirection.LONG : SignalDirection.BUY;
+            direction = SignalDirection.LONG;
             confidence = Math.round(Math.min((buyScore / 70) * 100, 95));
         } else if (sellScore >= MIN_SCORE && sellScore > buyScore) {
-            if (signalType === SignalType.SPOT) return null; // No SELL for SPOT
             direction = SignalDirection.SHORT;
             confidence = Math.round(Math.min((sellScore / 70) * 100, 95));
         } else {

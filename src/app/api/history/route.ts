@@ -6,9 +6,10 @@ export const dynamic = 'force-dynamic';
 /**
  * GET /api/history
  *
- * Public read of the server-side signal history: every standard and
- * on-chain signal the engines issued, with its outcome, recorded on the
- * server (Upstash Redis) instead of the visitor's browser localStorage.
+ * Public read of the server-side signal history: every standard,
+ * on-chain and scalping signal the engines issued, with its outcome,
+ * recorded on the server (Upstash Redis) instead of the visitor's
+ * browser localStorage.
  *
  * Response: { configured, signals, activeCount, generatedAt }
  *  - signals: resolved records, newest first (max 100). Each record is

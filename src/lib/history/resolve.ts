@@ -11,9 +11,13 @@ import {
 /**
  * Outcome resolution for server-side signal history.
  *
- * For each active record we walk the pair's real 1H klines from
+ * For each active record we walk the pair's real klines from
  * data-api.binance.vision (the same public market-data domain the
- * engines already use) in time order. The first touch decides:
+ * engines already use) in time order. The interval follows the engine:
+ * 1H for standard/on-chain, 5m for scalping (whose ±1% TP1 and -0.7%
+ * stop live and die inside a single hour - a 1H walk would see both
+ * levels inside one candle and the SL-wins-tie rule would wrongly mark
+ * most scalping signals LOSS). The first touch decides:
  *   SL touched first  -> LOSS   (status STOPPED)
  *   TP3 touched first -> WIN    (status COMPLETED)
  *   TP1/TP2 touches are recorded as milestones either way.
@@ -41,19 +45,24 @@ export interface Kline {
     close: number;
 }
 
-export type KlineFetcher = (symbol: string) => Promise<Kline[]>;
+export type KlineFetcher = (symbol: string, interval: '1h' | '5m') => Promise<Kline[]>;
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
-const KLINE_LIMIT = 1000; // ~41 days of 1H candles; expiries are 48h
+const FIVE_MIN_MS = 5 * 60 * 1000;
+const KLINE_LIMIT = 1000; // ~41 days of 1H candles, ~3.5 days of 5m; expiries are <= 48h
 
 export function hourFloorMs(ms: number): number {
     return Math.floor(ms / ONE_HOUR_MS) * ONE_HOUR_MS;
 }
 
-/** Default fetcher: real 1H klines from Binance's public market-data domain. */
-export async function defaultKlineFetcher(symbol: string): Promise<Kline[]> {
+export function fiveMinFloorMs(ms: number): number {
+    return Math.floor(ms / FIVE_MIN_MS) * FIVE_MIN_MS;
+}
+
+/** Default fetcher: real klines from Binance's public market-data domain. */
+export async function defaultKlineFetcher(symbol: string, interval: '1h' | '5m' = '1h'): Promise<Kline[]> {
     const fetchOnce = async (): Promise<Kline[]> => {
-        const klines = await BinanceAPI.getKlines(symbol, '1h', KLINE_LIMIT);
+        const klines = await BinanceAPI.getKlines(symbol, interval, KLINE_LIMIT);
         return klines
             .map(k => ({
                 openTime: Number(k[0]),
@@ -104,8 +113,10 @@ function profitLossPercent(rec: HistoryRecord, exitPrice: number): number {
 /**
  * Pure outcome computation for one record against an ordered kline list.
  * No I/O - unit-testable with scripted candles.
+ * `candleMs` is the kline interval in ms (1H for standard/on-chain,
+ * 5m for scalping): it floors the issuance bar and stamps resolution time.
  */
-export function resolveOutcome(rec: HistoryRecord, klines: Kline[], nowMs: number): Resolution {
+export function resolveOutcome(rec: HistoryRecord, klines: Kline[], nowMs: number, candleMs: number = ONE_HOUR_MS): Resolution {
     const sig = rec.signal;
     const isLong = sig.direction === 'LONG' || sig.direction === 'BUY';
     const sl = sig.stopLoss;
@@ -119,8 +130,8 @@ export function resolveOutcome(rec: HistoryRecord, klines: Kline[], nowMs: numbe
     let tp2Hit = Boolean(sig.tp2Hit);
     let tp3Hit = Boolean(sig.tp3Hit);
 
-    // Walk only candles that opened AFTER the issuance hour (see header).
-    const startAfter = hourFloorMs(issuedMs);
+    // Walk only candles that opened AFTER the issuance bar (see header).
+    const startAfter = Math.floor(issuedMs / candleMs) * candleMs;
     let lastClose: number | undefined;
     let lastCloseAtOrBeforeExpiry: number | undefined;
 
@@ -144,10 +155,10 @@ export function resolveOutcome(rec: HistoryRecord, klines: Kline[], nowMs: numbe
 
         // SL wins a same-candle tie: never claim an unprovable win.
         if (slTouched) {
-            return { outcome: 'LOSS', tp1Hit, tp2Hit, tp3Hit, exitPrice: sl, resolvedAtMs: k.openTime + ONE_HOUR_MS };
+            return { outcome: 'LOSS', tp1Hit, tp2Hit, tp3Hit, exitPrice: sl, resolvedAtMs: k.openTime + candleMs };
         }
         if (t3) {
-            return { outcome: 'WIN', tp1Hit, tp2Hit, tp3Hit, exitPrice: tp3, resolvedAtMs: k.openTime + ONE_HOUR_MS };
+            return { outcome: 'WIN', tp1Hit, tp2Hit, tp3Hit, exitPrice: tp3, resolvedAtMs: k.openTime + candleMs };
         }
     }
 
@@ -201,28 +212,33 @@ export async function resolveActiveSignals(
     summary.checked = actives.length;
     if (actives.length === 0) return summary;
 
-    const bySymbol = new Map<string, HistoryRecord[]>();
+    // Group by (symbol, interval): scalping resolves on 5m klines, the
+    // other engines on 1H. One fetch per group.
+    const bySymbolInterval = new Map<string, { symbol: string; interval: '1h' | '5m'; records: HistoryRecord[] }>();
     for (const rec of actives) {
+        const interval: '1h' | '5m' = rec.engine === 'scalping' ? '5m' : '1h';
         const symbol = pairToSymbol(rec.pair);
-        const list = bySymbol.get(symbol) ?? [];
-        list.push(rec);
-        bySymbol.set(symbol, list);
+        const key = `${symbol}|${interval}`;
+        const group = bySymbolInterval.get(key) ?? { symbol, interval, records: [] };
+        group.records.push(rec);
+        bySymbolInterval.set(key, group);
     }
 
     const nowMs = Date.now();
 
-    for (const [symbol, records] of bySymbol) {
+    for (const { symbol, interval, records } of bySymbolInterval.values()) {
         let klines: Kline[];
         try {
-            klines = await fetcher(symbol);
+            klines = await fetcher(symbol, interval);
         } catch {
             summary.errors.push(symbol);
             summary.stillActive += records.length;
             continue;
         }
 
+        const candleMs = interval === '5m' ? FIVE_MIN_MS : ONE_HOUR_MS;
         for (const rec of records) {
-            const res = resolveOutcome(rec, klines, nowMs);
+            const res = resolveOutcome(rec, klines, nowMs, candleMs);
             if (res.outcome === 'ACTIVE') {
                 // Milestones may have been hit while still active: persist
                 // them on the active record so a later resolution keeps

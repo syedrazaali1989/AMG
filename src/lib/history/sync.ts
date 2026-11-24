@@ -1,6 +1,6 @@
 import type { Signal } from '@/lib/signals/types';
 import { getHistoryRedis, countActive, historyId, recordActive, type HistoryEngine, type HistoryRecord } from './store';
-import { resolveActiveSignals, hourFloorMs, type KlineFetcher, type ResolveSummary } from './resolve';
+import { resolveActiveSignals, hourFloorMs, fiveMinFloorMs, type KlineFetcher, type ResolveSummary } from './resolve';
 
 /**
  * History sync drivers: record currently-active signals, then resolve
@@ -14,6 +14,9 @@ import { resolveActiveSignals, hourFloorMs, type KlineFetcher, type ResolveSumma
  * (fire-and-forget on each fresh generation); resolution of already
  * recorded actives also runs from the watcher so a setup resolves even
  * when nobody visits the on-chain page.
+ *
+ * Scalping engine: same pattern via /api/scalping/signals, resolved on
+ * 5m klines (see resolve.ts).
  *
  * Every step is guarded: no storage, no live data, or any failure just
  * returns a summary with configured:false / zero counts. History must
@@ -51,6 +54,9 @@ function toRecord(engine: HistoryEngine, signal: Signal, anchorMs: number): Hist
         issuedAt,
         signal: {
             ...signal,
+            // The completed pages filter scalping records on this flag
+            // (the same marker the old client-side SignalManager set).
+            ...(engine === 'scalping' ? { isScalping: true } : {}),
             timestamp: new Date(signal.timestamp),
             expiresAt: signal.expiresAt ? new Date(signal.expiresAt) : undefined
         }
@@ -112,6 +118,48 @@ export async function recordStandardSignals(signals: Signal[], barAnchors: Map<s
         // Recording failure never breaks the caller.
     }
     return recorded;
+}
+
+/**
+ * Record the scalping engine's current signals and resolve stale
+ * scalping actives (on 5m klines). The generator stamps a fresh id on
+ * every pass, so the anchor is the 5-minute bar the signal was first
+ * seen in. Called fire-and-forget by /api/scalping/signals; the
+ * watcher's resolveHistory() also resolves scalping records (it walks
+ * every engine) so a setup resolves even when nobody visits the page.
+ */
+export async function syncScalpingHistory(
+    current?: Signal[],
+    fetcher?: KlineFetcher
+): Promise<HistorySyncSummary> {
+    const redis = getHistoryRedis();
+    if (!redis) return EMPTY;
+
+    let recorded = 0;
+    try {
+        if (current) {
+            for (const signal of current) {
+                const anchorMs = fiveMinFloorMs(new Date(signal.timestamp).getTime());
+                const rec = toRecord('scalping', signal, anchorMs);
+                if (await recordActive(redis, rec)) recorded++;
+            }
+        }
+    } catch {
+        // Recording failure: still resolve what is already recorded.
+    }
+
+    let resolveSummary: ResolveSummary;
+    try {
+        resolveSummary = await resolveActiveSignals(redis, fetcher, 'scalping');
+    } catch {
+        resolveSummary = { checked: 0, resolved: 0, wins: 0, losses: 0, expired: 0, stillActive: 0, errors: [] };
+    }
+
+    try {
+        return await finish(redis, recorded, resolveSummary);
+    } catch {
+        return { ...EMPTY, configured: true, recorded, resolved: resolveSummary.resolved, wins: resolveSummary.wins, losses: resolveSummary.losses, expired: resolveSummary.expired };
+    }
 }
 
 /**
