@@ -189,6 +189,104 @@ function isCounterTrendSignal(direction: SignalDirection, trend: string): boolea
     return (isBullishSignal && isBearishMarket) || (isBearishSignal && isBullishMarket);
 }
 
+export interface CoreLevels {
+    stopLoss: number;
+    takeProfit: number;
+    takeProfit1: number;
+    takeProfit2: number;
+    takeProfit3: number;
+}
+
+/**
+ * ATR-based SL/TP levels, exactly as the standard engine computes them.
+ * Extracted verbatim from evaluateSignalCore (same multipliers, same
+ * Bollinger stop adjustment, same 0.5%-of-entry minimum TP distance) so
+ * the on-chain basket can reuse the identical formula for its alt legs
+ * instead of a second copy that could drift. Multipliers depend on
+ * confidence only. Returns null when any level is invalid.
+ * (isLong treats BUY as long, as everywhere else in the codebase;
+ * FUTURE signals only ever carry LONG/SHORT, so the standard engine's
+ * behaviour is unchanged.)
+ */
+export function calculateCoreLevels(
+    entryPrice: number,
+    direction: SignalDirection,
+    atr: number,
+    confidence: number,
+    bollingerBands: { upper: number; middle: number; lower: number }
+): CoreLevels | null {
+    const isLong = direction === SignalDirection.LONG || direction === SignalDirection.BUY;
+    let stopLoss: number;
+    let takeProfit: number;
+
+    // Multipliers depend on confidence only.
+    // Higher confidence = wider TP, tighter SL
+    const confidenceMultiplier = confidence / 100;
+    const slMultiplier = 1.5 - (confidenceMultiplier * 0.3);
+    const tpMultiplier = 3.5 + (confidenceMultiplier * 2.5);
+
+    if (isLong) {
+        stopLoss = entryPrice - (atr * slMultiplier);
+        takeProfit = entryPrice + (atr * tpMultiplier);
+
+        // Adjust stop based on Bollinger Bands
+        if (stopLoss > bollingerBands.lower) {
+            stopLoss = bollingerBands.lower * 0.995;
+        }
+    } else {
+        stopLoss = entryPrice + (atr * slMultiplier);
+        takeProfit = entryPrice - (atr * tpMultiplier);
+
+        // Adjust stop based on Bollinger Bands
+        if (stopLoss < bollingerBands.upper) {
+            stopLoss = bollingerBands.upper * 1.005;
+        }
+    }
+
+    // Calculate Partial Take Profits (TP1, TP2, TP3)
+    let takeProfit1: number;
+    let takeProfit2: number;
+    let takeProfit3: number;
+
+    if (isLong) {
+        // TP1 at 25%, TP2 at 65%, TP3 at 85% of the move
+        let tpDistance = takeProfit - entryPrice;
+
+        // Ensure minimum distance (at least 0.5% of entry price)
+        const minDistance = entryPrice * 0.005;
+        if (tpDistance < minDistance) {
+            tpDistance = minDistance;
+            takeProfit = entryPrice + tpDistance;
+        }
+
+        takeProfit1 = entryPrice + (tpDistance * 0.25);
+        takeProfit2 = entryPrice + (tpDistance * 0.65);
+        takeProfit3 = entryPrice + (tpDistance * 0.85);
+    } else {
+        let tpDistance = entryPrice - takeProfit;
+
+        const minDistance = entryPrice * 0.005;
+        if (tpDistance < minDistance) {
+            tpDistance = minDistance;
+            takeProfit = entryPrice - tpDistance;
+        }
+
+        takeProfit1 = entryPrice - (tpDistance * 0.25);
+        takeProfit2 = entryPrice - (tpDistance * 0.65);
+        takeProfit3 = entryPrice - (tpDistance * 0.85);
+    }
+
+    // Final validation: Ensure all prices are valid
+    const pricesToValidate = [entryPrice, stopLoss, takeProfit, takeProfit1, takeProfit2, takeProfit3];
+    const hasInvalidPrice = pricesToValidate.some(p => !p || isNaN(p) || !isFinite(p) || p <= 0);
+
+    if (hasInvalidPrice) {
+        return null;
+    }
+
+    return { stopLoss, takeProfit, takeProfit1, takeProfit2, takeProfit3 };
+}
+
 /**
  * Evaluate the engine's decision for one pair at one point in time.
  * Returns null when no signal should be issued. Behaviour with all rule
@@ -408,79 +506,20 @@ export function evaluateSignalCore(
     }
 
     // ============================================================
-    // LEVELS: entry, stop loss, take profit
+    // LEVELS: entry, stop loss, take profit — via the shared
+    // calculateCoreLevels() (extracted verbatim above; the on-chain
+    // basket reuses the same formula for its alt legs).
     // ============================================================
     const entryPrice = currentPrice;
-    let stopLoss: number;
-    let takeProfit: number;
 
     // Calculate ATR (true range) for volatility-based targets
     const atr = calculateATR(prices, marketData.highs, marketData.lows);
 
-    // Multipliers depend on confidence only.
-    // Higher confidence = wider TP, tighter SL
-    const confidenceMultiplier = confidence / 100;
-    const slMultiplier = 1.5 - (confidenceMultiplier * 0.3);
-    const tpMultiplier = 3.5 + (confidenceMultiplier * 2.5);
-
-    if (isLong) {
-        stopLoss = entryPrice - (atr * slMultiplier);
-        takeProfit = entryPrice + (atr * tpMultiplier);
-
-        // Adjust stop based on Bollinger Bands
-        if (stopLoss > bollingerBands.lower) {
-            stopLoss = bollingerBands.lower * 0.995;
-        }
-    } else {
-        stopLoss = entryPrice + (atr * slMultiplier);
-        takeProfit = entryPrice - (atr * tpMultiplier);
-
-        // Adjust stop based on Bollinger Bands
-        if (stopLoss < bollingerBands.upper) {
-            stopLoss = bollingerBands.upper * 1.005;
-        }
-    }
-
-    // Calculate Partial Take Profits (TP1, TP2, TP3)
-    let takeProfit1: number;
-    let takeProfit2: number;
-    let takeProfit3: number;
-
-    if (isLong) {
-        // TP1 at 25%, TP2 at 65%, TP3 at 85% of the move
-        let tpDistance = takeProfit - entryPrice;
-
-        // Ensure minimum distance (at least 0.5% of entry price)
-        const minDistance = entryPrice * 0.005;
-        if (tpDistance < minDistance) {
-            tpDistance = minDistance;
-            takeProfit = entryPrice + tpDistance;
-        }
-
-        takeProfit1 = entryPrice + (tpDistance * 0.25);
-        takeProfit2 = entryPrice + (tpDistance * 0.65);
-        takeProfit3 = entryPrice + (tpDistance * 0.85);
-    } else {
-        let tpDistance = entryPrice - takeProfit;
-
-        const minDistance = entryPrice * 0.005;
-        if (tpDistance < minDistance) {
-            tpDistance = minDistance;
-            takeProfit = entryPrice - tpDistance;
-        }
-
-        takeProfit1 = entryPrice - (tpDistance * 0.25);
-        takeProfit2 = entryPrice - (tpDistance * 0.65);
-        takeProfit3 = entryPrice - (tpDistance * 0.85);
-    }
-
-    // Final validation: Ensure all prices are valid
-    const pricesToValidate = [entryPrice, stopLoss, takeProfit, takeProfit1, takeProfit2, takeProfit3];
-    const hasInvalidPrice = pricesToValidate.some(p => !p || isNaN(p) || !isFinite(p) || p <= 0);
-
-    if (hasInvalidPrice) {
+    const levels = calculateCoreLevels(entryPrice, direction, atr, confidence, bollingerBands);
+    if (!levels) {
         return null;
     }
+    const { stopLoss, takeProfit, takeProfit1, takeProfit2, takeProfit3 } = levels;
 
     return {
         direction,

@@ -1,11 +1,10 @@
 import { Signal, SignalType, SignalDirection, MarketType, SignalStatus, Timeframe } from './types';
 import { BlockchainInfoAPI, LargeTransaction } from './blockchainInfoAPI';
+import { BinanceAPI } from './binanceAPI';
+import { evaluateSignalCore, DEFAULT_RULES } from './engineCore';
 import { ExchangeAvailability } from './exchangeAvailability';
 import { MarketDataManager } from './marketData';
 import { CorrelatedSignalGenerator } from './correlatedSignalGenerator';
-
-/** Minimum combined-score magnitude required to issue the BTC signal. */
-export const ONCHAIN_SCORE_THRESHOLD = 10;
 
 /** Minimum transaction value (USD) counted as a "large" BTC transfer. */
 export const ONCHAIN_MIN_TX_USD = 500000;
@@ -26,10 +25,23 @@ export interface OnChainDiagnostics {
     netFlowUSD: number;
     flowSentiment: string;
     onChainScore: number;
-    technicalScore: number | null;
+    /** Standard-engine core scores for the BTC evaluation (null when the
+     *  core issued nothing). The toy RSI/MACD technical half was replaced
+     *  by the core in round 5 — there is no separate technical score. */
+    buyScore: number | null;
+    sellScore: number | null;
+    coreConfidence: number | null;
     rsi: number | null;
-    combinedScore: number | null;
-    threshold: number;
+    /** BTC regime at the moment of the core evaluation (same definition
+     *  as the standard engine: price vs 4H EMA200 via
+     *  BinanceAPI.getBtcRegime). Null when the regime was unavailable. */
+    btcRegime: 'UP' | 'DOWN' | 'NEUTRAL' | null;
+    /** Signals the core issued but the whale veto blocked, by direction.
+     *  The veto is live-only: whale flow must not oppose the direction
+     *  (LONG needs net flow >= 0, SHORT needs net flow <= 0); neutral
+     *  flow never blocks. */
+    whaleVetoBlockedLong: number;
+    whaleVetoBlockedShort: number;
     btcSignalIssued: boolean;
     correlatedIssued: number;
 }
@@ -77,10 +89,13 @@ export class OnChainSignalGenerator {
             netFlowUSD: flow.net,
             flowSentiment: flow.sentiment,
             onChainScore: onChainScore.score,
-            technicalScore: null,
+            buyScore: null,
+            sellScore: null,
+            coreConfidence: null,
             rsi: null,
-            combinedScore: null,
-            threshold: ONCHAIN_SCORE_THRESHOLD,
+            btcRegime: null,
+            whaleVetoBlockedLong: 0,
+            whaleVetoBlockedShort: 0,
             btcSignalIssued: false,
             correlatedIssued: 0
         };
@@ -125,7 +140,20 @@ export class OnChainSignalGenerator {
     }
 
     /**
-     * Generate signal for Bitcoin using real blockchain data
+     * Generate signal for Bitcoin: the STANDARD engine's decision core
+     * (evaluateSignalCore, verbatim — the same code the /api/signals
+     * route runs) decides entry/direction/levels, and the live whale
+     * flow acts as a veto only — it must not oppose the core's
+     * direction. Round 5 backtest (ONCHAIN-ROUND5-REPORT.md): standard
+     * entry + core ATR levels, basket-wide — 12 events, 70.9% win,
+     * +0.497R expectancy, all four gate conditions met.
+     *
+     * The old toy entry (RSI/MACD score combined 50/50 with the whale
+     * score, fire at |combined| >= 10) is gone: rounds 1-4 proved it
+     * loses money (-0.545R baseline) and that MACD sign alone could
+     * fire a signal. The whale half is NOT part of the entry decision
+     * anymore — it cannot be backtested historically, so it only ever
+     * removes signals, never creates them.
      */
     private static async generateSignalForBitcoin(
         transactions: LargeTransaction[],
@@ -133,54 +161,67 @@ export class OnChainSignalGenerator {
     ): Promise<Signal | null> {
         const pair = 'BTC/USDT';
 
-        // Get REAL market data from Binance API (throws if unavailable)
+        // Market data + core context, exactly as the standard route
+        // builds it (standardSignals.generateStandardSignals): 100x 1H
+        // closes, 4H closes for the MTF filter, BTC regime.
+        // fundingRate is intentionally left undefined — the backtest
+        // had no historical funding data, and the core treats undefined
+        // funding as neutral (never blocks).
         const marketData = await MarketDataManager.generateMarketData(pair, MarketType.CRYPTO, 100);
         const currentPrice = marketData.prices[marketData.prices.length - 1];
 
-        // Calculate on-chain score from real Bitcoin transactions
-        const onChainScore = this.calculateBitcoinOnChainScore(transactions);
+        const btcRegime = await BinanceAPI.getBtcRegime();
+        diagnostics.btcRegime = btcRegime ?? null;
+        marketData.btcTrend = btcRegime;
+        try {
+            marketData.closes4h = await BinanceAPI.get4hCloses(pair, 250);
+        } catch {
+            console.warn('4H closes unavailable for BTC/USDT (MTF filter neutral)');
+        }
 
-        // Calculate technical score
-        const technicalScore = this.calculateTechnicalScore(marketData.prices);
-
-        // Combine scores
-        const combinedScore = {
-            onChain: onChainScore.score,
-            technical: technicalScore.score,
-            total: (onChainScore.score * 0.5) + (technicalScore.score * 0.5)
-        };
-
-        diagnostics.technicalScore = technicalScore.score;
-        diagnostics.rsi = technicalScore.rsi;
-        diagnostics.combinedScore = combinedScore.total;
-
-        // Debug logging
-        console.log(`📊 BTC Scoring: OnChain=${onChainScore.score}, Technical=${technicalScore.score}, Total=${combinedScore.total}`);
-        console.log(`🐋 Flow: ${onChainScore.sentiment} (In:${onChainScore.inflow}, Out:${onChainScore.outflow})`);
-        console.log(`📈 Technical: RSI=${technicalScore.rsi}, MACD=${technicalScore.macd.toFixed(2)}`);
-
-        // Minimum score threshold
-        if (Math.abs(combinedScore.total) < ONCHAIN_SCORE_THRESHOLD) {
-            console.log(`⚠️ BTC signal too weak (${combinedScore.total.toFixed(1)}), need ≥${ONCHAIN_SCORE_THRESHOLD}`);
+        // The standard engine's decision, verbatim.
+        const core = evaluateSignalCore(marketData, SignalType.FUTURE, DEFAULT_RULES);
+        if (!core) {
+            console.log(`🔗 No on-chain BTC signal: standard core issued nothing for this bar`);
             return null;
         }
 
-        // Determine direction
-        const direction = combinedScore.total > 0 ? SignalDirection.LONG : SignalDirection.SHORT;
-        const confidence = Math.min(Math.round(Math.abs(combinedScore.total)), 95);
+        diagnostics.buyScore = core.buyScore;
+        diagnostics.sellScore = core.sellScore;
+        diagnostics.coreConfidence = core.confidence;
+        diagnostics.rsi = core.rsi;
 
-        // Calculate TP/SL levels
-        const { tp1, tp2, tp3, stopLoss } = this.calculateLevels(currentPrice, direction);
+        const direction = core.direction;
+        const isLong = direction === SignalDirection.LONG || direction === SignalDirection.BUY;
+
+        // WHALE VETO (live-only): the whale flow must not oppose the
+        // core's direction. LONG needs net flow >= 0, SHORT needs net
+        // flow <= 0; neutral flow never blocks. Fail-neutral: if the
+        // flow cannot be computed, do not block.
+        const flow = BlockchainInfoAPI.calculateExchangeFlow(transactions);
+        if (isLong && flow.net < 0) {
+            diagnostics.whaleVetoBlockedLong++;
+            console.log(`🚫 On-chain BTC LONG blocked by whale veto (net flow $${(flow.net / 1000000).toFixed(1)}M, bearish)`);
+            return null;
+        }
+        if (!isLong && flow.net > 0) {
+            diagnostics.whaleVetoBlockedShort++;
+            console.log(`🚫 On-chain BTC SHORT blocked by whale veto (net flow $${(flow.net / 1000000).toFixed(1)}M, bullish)`);
+            return null;
+        }
+
+        // Levels come from the core (verbatim) — same as the standard
+        // engine: takeProfit is the final TP, takeProfit1/2/3 are
+        // milestones. (The old fixed -3%/+5/+8/+12% levels are gone:
+        // round 4 proved the entry starves on them.)
+        const onChainScore = this.calculateBitcoinOnChainScore(transactions);
 
         // Get available exchanges
         const availableExchanges = ExchangeAvailability.getAvailableExchanges(pair, MarketType.CRYPTO);
 
-        // Get exchange flow summary
-        const flow = BlockchainInfoAPI.calculateExchangeFlow(transactions);
-
         // FUTURE signals expire after 48h (repo-wide convention); the
         // outcome updater marks an unfilled signal EXPIRED at that point,
-        // never a win. TP1/TP2 are milestones - only the final TP (tp3)
+        // never a win. TP1/TP2 are milestones - only the final TP
         // completes the trade.
         const expiresAt = new Date();
         expiresAt.setHours(expiresAt.getHours() + 48);
@@ -192,14 +233,14 @@ export class OnChainSignalGenerator {
             direction,
             entryPrice: currentPrice,
             currentPrice,
-            takeProfit: tp3,
-            takeProfit1: tp1,
-            takeProfit2: tp2,
-            takeProfit3: tp3,
-            stopLoss,
-            confidence,
-            rsi: technicalScore.rsi,
-            macdValue: technicalScore.macd,
+            takeProfit: core.takeProfit,
+            takeProfit1: core.takeProfit1,
+            takeProfit2: core.takeProfit2,
+            takeProfit3: core.takeProfit3,
+            stopLoss: core.stopLoss,
+            confidence: core.confidence,
+            rsi: core.rsi,
+            macdValue: core.macd.macd,
             marketType: MarketType.CRYPTO,
             signalType: SignalType.FUTURE,
             status: SignalStatus.ACTIVE,
@@ -213,10 +254,10 @@ export class OnChainSignalGenerator {
             lowestPrice: currentPrice,
             profitLossPercentage: 0, // Initial P/L
             availableExchanges,
-            rationalePoints: this.generateBitcoinRationale(onChainScore, technicalScore, flow, direction, transactions.length)
+            rationalePoints: this.generateBitcoinRationale(onChainScore, core, flow, direction, transactions.length)
         };
 
-        console.log(`✅ Generated BTC ${direction} signal (confidence: ${confidence}%)`);
+        console.log(`✅ Generated BTC ${direction} signal (standard core, confidence: ${core.confidence}%, whale flow ${flow.sentiment})`);
         return signal;
     }
 
@@ -256,11 +297,13 @@ export class OnChainSignalGenerator {
     }
 
     /**
-     * Generate rationale for Bitcoin signal using real data
+     * Generate rationale for Bitcoin signal using real data.
+     * Entry comes from the standard engine's core; the whale feed is
+     * shown as the veto evidence, not as the entry reason.
      */
     private static generateBitcoinRationale(
         onChain: any,
-        technical: any,
+        core: any,
         flow: any,
         direction: SignalDirection,
         txCount: number
@@ -269,114 +312,26 @@ export class OnChainSignalGenerator {
 
         rationale.push(`🔗 ${txCount} real Bitcoin transactions analyzed (≥$500K each, live Blockchain.info feed)`);
 
-        // On-chain rationale
-        if (direction === SignalDirection.LONG) {
+        if (direction === SignalDirection.LONG || direction === SignalDirection.BUY) {
+            rationale.push(`📊 Standard engine LONG (buy score ${core.buyScore}, confidence ${core.confidence}%)`);
             if (onChain.outflow > onChain.inflow) {
                 rationale.push(`🐋 ${onChain.outflow} withdrawals from exchanges - Bullish accumulation`);
             }
-            if (technical.rsi < 40) {
-                rationale.push(`📊 RSI oversold (${technical.rsi}) - Bounce expected`);
+            if (core.rsi < 40) {
+                rationale.push(`📊 RSI oversold (${core.rsi}) - Bounce expected`);
             }
         } else {
+            rationale.push(`📊 Standard engine SHORT (sell score ${core.sellScore}, confidence ${core.confidence}%)`);
             if (onChain.inflow > onChain.outflow) {
                 rationale.push(`🐋 ${onChain.inflow} deposits to exchanges - Selling pressure`);
             }
-            if (technical.rsi > 60) {
-                rationale.push(`📊 RSI overbought (${technical.rsi}) - Correction expected`);
+            if (core.rsi > 60) {
+                rationale.push(`📊 RSI overbought (${core.rsi}) - Correction expected`);
             }
         }
 
         rationale.push(`💱 Net flow: ${flow.sentiment} ($${(Math.abs(flow.net) / 1000000).toFixed(1)}M)`);
 
         return rationale;
-    }
-
-    /**
-     * Calculate technical score
-     */
-    private static calculateTechnicalScore(prices: number[]): {
-        score: number;
-        rsi: number;
-        macd: number;
-    } {
-        let score = 0;
-
-        // Simple RSI calculation
-        const rsi = this.calculateRSI(prices, 14);
-
-        // RSI scoring
-        if (rsi < 30) score += 30; // Oversold = bullish
-        else if (rsi > 70) score -= 30; // Overbought = bearish
-        else if (rsi < 40) score += 15;
-        else if (rsi > 60) score -= 15;
-
-        // Simple MACD
-        const ema12 = this.calculateEMA(prices, 12);
-        const ema26 = this.calculateEMA(prices, 26);
-        const macd = ema12 - ema26;
-
-        // MACD scoring
-        if (macd > 0) score += 20; // Bullish
-        else score -= 20; // Bearish
-
-        return { score, rsi: Math.round(rsi), macd };
-    }
-
-    /**
-     * Calculate RSI
-     */
-    private static calculateRSI(prices: number[], period: number = 14): number {
-        if (prices.length < period + 1) return 50;
-
-        let gains = 0;
-        let losses = 0;
-
-        for (let i = prices.length - period; i < prices.length; i++) {
-            const change = prices[i] - prices[i - 1];
-            if (change > 0) gains += change;
-            else losses -= change;
-        }
-
-        const avgGain = gains / period;
-        const avgLoss = losses / period;
-
-        if (avgLoss === 0) return 100;
-        const rs = avgGain / avgLoss;
-        return 100 - (100 / (1 + rs));
-    }
-
-    /**
-     * Calculate EMA
-     */
-    private static calculateEMA(prices: number[], period: number): number {
-        const multiplier = 2 / (period + 1);
-        let ema = prices[prices.length - period];
-
-        for (let i = prices.length - period + 1; i < prices.length; i++) {
-            ema = (prices[i] - ema) * multiplier + ema;
-        }
-
-        return ema;
-    }
-
-    /**
-     * Calculate TP/SL levels (aggressive whale targets)
-     */
-    private static calculateLevels(entryPrice: number, direction: SignalDirection) {
-        if (direction === SignalDirection.LONG) {
-            return {
-                tp1: entryPrice * 1.05,  // 5% - whale quick move
-                tp2: entryPrice * 1.08,  // 8% - main whale target
-                tp3: entryPrice * 1.12,  // 12% - strong whale signal
-                stopLoss: entryPrice * 0.97 // -3% stop
-            };
-        } else {
-            return {
-                tp1: entryPrice * 0.95,  // 5%
-                tp2: entryPrice * 0.92,  // 8%
-                tp3: entryPrice * 0.88,  // 12%
-                stopLoss: entryPrice * 1.03 // -3% stop
-            };
-        }
     }
 }

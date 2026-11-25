@@ -192,8 +192,8 @@ export default function OnChainPage() {
                             <div>Wallet-to-wallet (unknown): <b>{diagnostics.unknownCount}</b></div>
                             <div>Net exchange flow: <b>{fmtUSD(Math.abs(diagnostics.netFlowUSD))}</b> ({diagnostics.flowSentiment})</div>
                             <div>On-chain score: <b>{diagnostics.onChainScore}</b></div>
-                            <div>Technical score: <b>{diagnostics.technicalScore ?? '-'}</b>{diagnostics.rsi !== null ? ` (RSI ${diagnostics.rsi})` : ''}</div>
-                            <div>Combined: <b>{diagnostics.combinedScore !== null ? diagnostics.combinedScore.toFixed(1) : '-'}</b> (needs &plusmn;{diagnostics.threshold})</div>
+                            <div>Core score: <b>{diagnostics.buyScore !== null ? `buy ${diagnostics.buyScore} / sell ${diagnostics.sellScore}` : '-'}</b>{diagnostics.coreConfidence !== null ? ` (confidence ${diagnostics.coreConfidence}%)` : ''}{diagnostics.rsi !== null ? ` • RSI ${diagnostics.rsi}` : ''}</div>
+                            <div>Whale veto: <b>{diagnostics.whaleVetoBlockedLong + diagnostics.whaleVetoBlockedShort > 0 ? `blocked ${diagnostics.whaleVetoBlockedLong} long / ${diagnostics.whaleVetoBlockedShort} short` : 'none blocked'}</b></div>
                         </div>
                         <p className="text-sm text-muted-foreground mt-3">
                             BTC signal issued this scan: <b>{diagnostics.btcSignalIssued ? 'yes' : 'no'}</b>

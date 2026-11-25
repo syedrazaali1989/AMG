@@ -5,6 +5,18 @@ import { Signal, SignalType, SignalDirection, MarketType, SignalStatus, Timefram
 import { CorrelationMatrix, CorrelationData } from './correlationMatrix';
 import { ExchangeAvailability } from './exchangeAvailability';
 import { MarketDataManager } from './marketData';
+import { calculateCoreLevels, calculateATR } from './engineCore';
+import { TechnicalIndicators } from './indicators';
+
+/**
+ * MATIC was delisted (renamed to POL) in Sep 2024; the correlation
+ * table still lists MATIC/USDT, so the on-chain path must fetch the
+ * live POL/USDT series for that slot — otherwise it reads a frozen
+ * series. The round-5 backtest used POLUSDT for the MATIC slot.
+ */
+const MARKET_PAIR_OVERRIDES: Record<string, string> = {
+    'MATIC/USDT': 'POL/USDT'
+};
 
 export class CorrelatedSignalGenerator {
     /**
@@ -50,9 +62,13 @@ export class CorrelatedSignalGenerator {
         coinData: CorrelationData
     ): Promise<Signal | null> {
         try {
+            // The traded pair for this slot (MATIC/USDT -> POL/USDT:
+            // MATIC was delisted in Sep 2024 — see MARKET_PAIR_OVERRIDES).
+            const marketPair = MARKET_PAIR_OVERRIDES[coinData.pair] ?? coinData.pair;
+
             // Get real market data for the altcoin
             const marketData = await MarketDataManager.generateMarketData(
-                coinData.pair,
+                marketPair,
                 MarketType.CRYPTO,
                 100
             );
@@ -71,16 +87,22 @@ export class CorrelatedSignalGenerator {
             const ema26 = this.calculateEMA(marketData.prices, 26);
             const macdValue = ema12 - ema26;
 
-            // Calculate TP/SL levels (same % as BTC)
-            const { tp1, tp2, tp3, stopLoss } = this.calculateLevels(
-                currentPrice,
-                direction,
-                coinData.correlation
-            );
+            // TP/SL levels: the standard engine's ATR level formula
+            // (round 5 — the fixed -3%/+5/+8/+12% levels are gone: the
+            // backtest proved the entry starves on them). The alt's own
+            // ATR/Bollinger with the production alt confidence.
+            const atr = calculateATR(marketData.prices, marketData.highs, marketData.lows);
+            const bollingerBands = TechnicalIndicators.calculateBollingerBands(marketData.prices);
+            const levels = calculateCoreLevels(currentPrice, direction, atr, confidence, bollingerBands);
+            if (!levels) {
+                console.error(`Failed to compute core levels for ${marketPair}`);
+                return null;
+            }
+            const { takeProfit, takeProfit1: tp1, takeProfit2: tp2, takeProfit3: tp3, stopLoss } = levels;
 
             // Get available exchanges
             const availableExchanges = ExchangeAvailability.getAvailableExchanges(
-                coinData.pair,
+                marketPair,
                 MarketType.CRYPTO
             );
 
@@ -91,12 +113,12 @@ export class CorrelatedSignalGenerator {
 
             // Create signal
             const signal: Signal = {
-                id: `CORR_${coinData.symbol}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-                pair: coinData.pair,
+                id: `CORR_${marketPair.split('/')[0]}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                pair: marketPair,
                 direction,
                 entryPrice: currentPrice,
                 currentPrice,
-                takeProfit: tp3,
+                takeProfit,
                 takeProfit1: tp1,
                 takeProfit2: tp2,
                 takeProfit3: tp3,
@@ -127,33 +149,6 @@ export class CorrelatedSignalGenerator {
         }
     }
 
-    /**
-     * Calculate TP/SL levels for correlated coin
-     * Same aggressive targets as BTC (5%, 8%, 12%)
-     */
-    private static calculateLevels(
-        entryPrice: number,
-        direction: SignalDirection,
-        correlation: number
-    ) {
-        // Altcoins often move MORE than BTC
-        // But we keep same targets for consistency
-        if (direction === SignalDirection.LONG) {
-            return {
-                tp1: entryPrice * 1.05,  // 5%
-                tp2: entryPrice * 1.08,  // 8%
-                tp3: entryPrice * 1.12,  // 12%
-                stopLoss: entryPrice * 0.97 // -3%
-            };
-        } else {
-            return {
-                tp1: entryPrice * 0.95,  // 5%
-                tp2: entryPrice * 0.92,  // 8%
-                tp3: entryPrice * 0.88,  // 12%
-                stopLoss: entryPrice * 1.03 // -3%
-            };
-        }
-    }
 
     /**
      * Generate rationale for correlated signal
@@ -183,7 +178,7 @@ export class CorrelatedSignalGenerator {
 
         rationale.push(`💎 ${coinData.label} - Strong historical correlation with BTC`);
         rationale.push(`📊 RSI: ${Math.round(rsi)} | MACD: ${macdValue > 0 ? 'Bullish' : 'Bearish'}`);
-        rationale.push(`⚡ Same aggressive targets as BTC (5%, 8%, 12%)`);
+        rationale.push(`⚡ ATR-based levels (standard engine formula) - same direction as BTC`);
 
         return rationale;
     }
