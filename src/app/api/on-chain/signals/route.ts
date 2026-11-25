@@ -16,10 +16,14 @@ export const dynamic = 'force-dynamic';
  *   2. Exchange inflow/outflow score from those transfers (a transfer is
  *      labelled inflow/outflow only when a known exchange wallet address
  *      is involved; everything else is reported as "unknown").
- *   3. Technical score (RSI/MACD) from live Binance 1h prices.
- *   4. A BTC signal is issued only when |combined score| >= 10; altcoin
- *      signals are then derived from it by historical BTC correlation
- *      and labelled as correlated.
+ *   3. The STANDARD engine's decision core (evaluateSignalCore,
+ *      verbatim) decides entry/direction/levels from live Binance 1h
+ *      prices; the whale flow is a veto only — it must not oppose the
+ *      core's direction. Round 5 backtest: 70.9% win, +0.497R.
+ *   4. A BTC signal is issued only when the core fires and the whale
+ *      veto passes; altcoin signals are then derived from it by
+ *      historical BTC correlation (MATIC slot = POL/USDT) with the
+ *      core's ATR levels, and labelled as correlated.
  *
  * The response also carries the transaction feed and the scoring
  * diagnostics so a "no signal" outcome is auditable. If a live source is
