@@ -3,7 +3,9 @@
  * - Runtime caching for STATIC ASSETS ONLY (cache-first). API responses
  *   are never cached: signal data must always be live.
  * - Web Push: shows the notification the server sent and focuses/opens
- *   the signal's page on click.
+ *   the signal's page on click. The payload's icon/badge (the AMG
+ *   logo) are passed through to showNotification; a payload without
+ *   them falls back to /logo.png.
  */
 
 const STATIC_CACHE = 'amg-static-v1';
@@ -79,6 +81,8 @@ self.addEventListener('push', (event) => {
     const title = data.title || 'AMG Trading';
     const options = {
         body: data.body || '',
+        icon: data.icon || '/logo.png',
+        badge: data.badge || '/logo.png',
         data: { url: data.url || '/dashboard' }
     };
 

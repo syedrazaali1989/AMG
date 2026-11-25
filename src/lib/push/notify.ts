@@ -42,11 +42,29 @@ const LAST_CHECK_KEY = 'push:lastcheck';
 const NOTIFIED_TTL_MS = 72 * 60 * 60 * 1000; // 72h
 const OPPORTUNISTIC_INTERVAL_MS = 3 * 60 * 1000; // 3 minutes
 
+/** Human-readable engine label for notification titles, e.g. "Standard Signal: BTC/USDT SHORT". */
+const ENGINE_LABELS: Record<string, string> = {
+    standard: 'Standard',
+    'scalping-v2': 'Scalping V2',
+    gold: 'Gold'
+};
+
+/**
+ * Notification icon/badge. Absolute production URL: a push payload
+ * must carry an absolute URL (a relative path does not resolve in a
+ * notification). This is the ONLY icon the site uses - the manifest
+ * stays icon-free and there is no favicon, per the owner's order.
+ */
+const NOTIFICATION_ICON_URL = 'https://amgtrading.vercel.app/logo.png';
+
 export interface PushCandidate {
     id: string;
     title: string;
     body: string;
     url: string;
+    /** Logo shown on the notification (and as the small badge icon). */
+    icon: string;
+    badge: string;
     /** Standard-engine signals carry their source signal + bar anchor for history. */
     signal?: Signal;
     anchorMs?: number;
@@ -71,9 +89,11 @@ function toCandidate(engine: string, url: string, signal: Signal, issuedAnchor: 
     const tp1 = signal.takeProfit1 ?? signal.takeProfit;
     return {
         id: `${engine}:${signal.pair}:${signal.direction}:${issuedAnchor}`,
-        title: `New Signal: ${signal.pair} ${signal.direction}`,
+        title: `${ENGINE_LABELS[engine] ?? engine} Signal: ${signal.pair} ${signal.direction}`,
         body: `Entry ${formatPrice(signal.entryPrice)} · SL ${formatPrice(signal.stopLoss)} · TP1 ${formatPrice(tp1)}`,
         url,
+        icon: NOTIFICATION_ICON_URL,
+        badge: NOTIFICATION_ICON_URL,
         signal,
         anchorMs
     };
@@ -90,6 +110,17 @@ function anchorFromEngineId(signal: Signal): string {
  * push candidates. Exported for testing/diagnostics. An engine that
  * fails (live data down) contributes nothing - its failure never
  * invents signals and never blocks the other engines.
+ *
+ * Deliberately NOT covered: old scalping and on-chain (see
+ * PUSH-LABEL-ICON-REPORT.md). Both stamp wall-clock + random ids
+ * (SCALP_/ONCHAIN_${Date.now()}_${random}) and their generators return
+ * no bar anchor, so there is no stable engine:pair:side:anchor id:
+ * a wall-clock 5m anchor would re-notify a persistent scalping setup
+ * every 5 minutes, and on-chain's BTC leg is the standard core's BTC
+ * signal verbatim (it would double-notify the same trade). Both would
+ * also add ~30 / ~12 more Binance fetches to a burst that already
+ * trips 418 rate limits. Adding them cleanly needs the generators to
+ * return their decision-bar anchors first.
  */
 export async function collectCurrentCandidates(): Promise<PushCandidate[]> {
     const candidates: PushCandidate[] = [];
@@ -203,7 +234,9 @@ export async function checkAndNotify(): Promise<CheckSummary> {
             const payload = JSON.stringify({
                 title: candidate.title,
                 body: candidate.body,
-                url: candidate.url
+                url: candidate.url,
+                icon: candidate.icon,
+                badge: candidate.badge
             });
             for (const sub of subs) {
                 if (deadEndpoints.has(sub.endpoint)) continue;
