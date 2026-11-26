@@ -19,10 +19,39 @@ export class PredictiveModel {
     private static modelAccuracy = 0;
 
     /**
+     * In-flight initialization, shared by concurrent callers. The plain
+     * `if (this.model)` check alone is NOT enough: ~22 parallel
+     * generatePrediction() calls all pass it before any of them finishes
+     * the async indexeddb load, so all 22 would still build a fresh LSTM.
+     * Memoizing the promise makes the whole tick share one model build.
+     */
+    private static initPromise: Promise<void> | null = null;
+
     /**
-     * Initialize or load the ML model
+     * Initialize or load the ML model (once per process; concurrent
+     * callers share the single in-flight attempt). First call in a
+     * process creates the model exactly as before; every later call
+     * reuses it. The model is never trained server-side and its
+     * prediction never gates or scores any signal (display-only
+     * metadata), so reusing the one per-process model changes no signal.
+     * clearModel() resets both fields, so a later initialize() still
+     * recreates it.
      */
     static async initialize(): Promise<void> {
+        if (this.model) {
+            return;
+        }
+        if (!this.initPromise) {
+            this.initPromise = this.initializeOnce().catch((error) => {
+                // Let a later call retry a failed initialization.
+                this.initPromise = null;
+                throw error;
+            });
+        }
+        return this.initPromise;
+    }
+
+    private static async initializeOnce(): Promise<void> {
         try {
             // Try to load existing model from browser storage
             const modelPath = 'indexeddb://trading-predictor-model';
@@ -345,6 +374,7 @@ export class PredictiveModel {
         try {
             await tf.io.removeModel('indexeddb://trading-predictor-model');
             this.model = null;
+            this.initPromise = null;
             this.modelAccuracy = 0;
             localStorage.removeItem('mlModelAccuracy');
             console.log('✅ Model cleared from storage');
