@@ -40,10 +40,10 @@ export function Navbar() {
     const navLinks = [
         { href: '/', label: 'Home' },
         { href: '/dashboard', label: 'Standard' },
-        { href: '/scalping', label: 'Scalping ⚡' },
-        { href: '/scalping-v2', label: 'Scalping V2 🎯' },
+        { href: '/scalping', label: 'Scalping' },
+        { href: '/scalping-v2', label: 'Scalping V2' },
         { href: '/money-rotation', label: 'Money Rotation 🔄' },
-        { href: '/on-chain', label: 'On-Chain 🐋' },
+        { href: '/on-chain', label: 'On-Chain' },
         { href: '/gold', label: 'Gold 🥇' },
         { href: '/flow-map', label: 'Flow Map' },
         { href: '/coins', label: 'Coins' },
