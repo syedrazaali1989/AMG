@@ -4,6 +4,7 @@ import { MarketType, MarketData } from './types';
 import { BinanceAPI } from './binanceAPI';
 import { MexcAPI } from './mexcAPI';
 import { ExnessAPI } from './exnessAPI';
+import type { TickKlineCache } from './klineCache';
 
 export class MarketDataManager {
     /**
@@ -17,10 +18,11 @@ export class MarketDataManager {
     static async generateMarketData(
         pair: string,
         marketType: MarketType,
-        dataPoints: number = 100
+        dataPoints: number = 100,
+        cache?: TickKlineCache
     ): Promise<MarketData> {
         if (marketType === MarketType.CRYPTO) {
-            const binanceData = await BinanceAPI.getMarketDataWithRealPrices(pair);
+            const binanceData = await BinanceAPI.getMarketDataWithRealPrices(pair, cache);
             return {
                 pair,
                 marketType,

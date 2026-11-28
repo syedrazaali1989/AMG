@@ -1,6 +1,7 @@
 import { MarketType } from './types';
 import { BinanceAPI } from './binanceAPI';
 import { ExnessAPI } from './exnessAPI';
+import type { TickKlineCache } from './klineCache';
 
 /**
  * Scalping Market Data Generator
@@ -19,11 +20,11 @@ export class ScalpingMarketData {
      *   Exness feed is simulated) always throws. Signals must never be
      *   generated from simulated prices.
      */
-    static async generateScalpingData(pair: string, marketType: MarketType, candleCount: number = 48, strict = false) {
+    static async generateScalpingData(pair: string, marketType: MarketType, candleCount: number = 48, strict = false, cache?: TickKlineCache) {
         // Try to fetch real Binance data for crypto pairs
         if (marketType === MarketType.CRYPTO) {
             try {
-                const binanceData = await BinanceAPI.getScalpingMarketData(pair);
+                const binanceData = await BinanceAPI.getScalpingMarketData(pair, cache);
 
                 if (strict) {
                     // Freshness gate: the last candle must be recent.
@@ -45,6 +46,9 @@ export class ScalpingMarketData {
                     volumes: binanceData.volumes,
                     highs: binanceData.highs,
                     lows: binanceData.lows,
+                    // Candle open times, for the push watcher's decision-bar
+                    // anchor (plumbing only — the scoring never reads them).
+                    timestamps: binanceData.timestamps,
                     timeframe: '5m' as const,
                     currentPrice: binanceData.currentPrice
                 };

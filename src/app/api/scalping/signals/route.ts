@@ -91,7 +91,7 @@ export async function GET(request: NextRequest) {
         let failedPairs = 0;
         for (const result of settled) {
             if (result.status === 'fulfilled') {
-                signals.push(...result.value);
+                signals.push(...result.value.signals);
             } else {
                 failedPairs++;
             }

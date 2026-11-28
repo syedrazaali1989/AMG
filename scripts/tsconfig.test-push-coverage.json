@@ -1,0 +1,1 @@
+{"compilerOptions":{"baseUrl":"..","esModuleInterop":true,"forceConsistentCasingInFileNames":true,"module":"commonjs","moduleResolution":"node","outDir":"/tmp/amg-bt-build","paths":{"@/*":["src/*"]},"rootDir":"..","skipLibCheck":true,"strict":true,"target":"ES2020","types":["node"]},"include":["test-push-coverage.ts","../src/lib/push/notify.ts"]}

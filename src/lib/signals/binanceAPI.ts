@@ -1,6 +1,7 @@
 // Binance API Integration for Real-Time Crypto Prices
 
 import { TechnicalIndicators } from './indicators';
+import type { TickKlineCache } from './klineCache';
 
 export interface BinanceTickerPrice {
     symbol: string;
@@ -119,32 +120,41 @@ export class BinanceAPI {
     }
 
     /**
-     * Get historical klines/candlestick data
+     * Get historical klines/candlestick data.
+     *
+     * `cache` (when given) is a per-tick TickKlineCache: identical
+     * (symbol, interval) fetches inside one watch tick share a single
+     * request, and a longer cached series serves a shorter limit by
+     * tail-slice. Route callers pass no cache and always fetch fresh.
      */
     static async getKlines(
         symbol: string,
         interval: string = '1h',
-        limit: number = 100
+        limit: number = 100,
+        cache?: TickKlineCache
     ): Promise<number[][]> {
-        try {
-            const response = await fetch(
-                `${this.BASE_URL}/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`
-            );
+        const fetchFn = async (): Promise<number[][]> => {
+            try {
+                const response = await fetch(
+                    `${this.BASE_URL}/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`
+                );
 
-            if (!response.ok) {
-                throw new Error(`Binance API error: ${response.status}`);
-            }
+                if (!response.ok) {
+                    throw new Error(`Binance API error: ${response.status}`);
+                }
 
-            const data = await response.json();
-            return data;
-        } catch (error) {
-            // Binance is unreachable (network/CORS/geo). There is NO simulated
-            // fallback: callers must treat this as "live data unavailable".
-            if (process.env.NODE_ENV === 'development') {
-                console.info(`📊 Binance API unavailable for ${symbol}`);
+                return (await response.json()) as number[][];
+            } catch (error) {
+                // Binance is unreachable (network/CORS/geo). There is NO simulated
+                // fallback: callers must treat this as "live data unavailable".
+                if (process.env.NODE_ENV === 'development') {
+                    console.info(`📊 Binance API unavailable for ${symbol}`);
+                }
+                throw error;
             }
-            throw error;
-        }
+        };
+        if (cache) return cache.getKlines(symbol, interval, limit, fetchFn);
+        return fetchFn();
     }
 
     /**
@@ -154,10 +164,11 @@ export class BinanceAPI {
     static async getCandles(
         pair: string,
         interval: string,
-        limit: number = 100
+        limit: number = 100,
+        cache?: TickKlineCache
     ): Promise<Candle[]> {
         const symbol = this.pairToBinanceSymbol(pair);
-        const klines = await this.getKlines(symbol, interval, limit);
+        const klines = await this.getKlines(symbol, interval, limit, cache);
         return klines.map(kline => ({
             timestamp: Number(kline[0]),
             open: parseFloat(String(kline[1])),
@@ -242,7 +253,7 @@ export class BinanceAPI {
     /**
      * Get market data with real prices and historical data
      */
-    static async getMarketDataWithRealPrices(pair: string): Promise<{
+    static async getMarketDataWithRealPrices(pair: string, cache?: TickKlineCache): Promise<{
         currentPrice: number;
         prices: number[];
         highs: number[];
@@ -254,7 +265,7 @@ export class BinanceAPI {
             const symbol = this.pairToBinanceSymbol(pair);
 
             // Get historical klines (100 hours of data)
-            const klines = await this.getKlines(symbol, '1h', 100);
+            const klines = await this.getKlines(symbol, '1h', 100, cache);
 
             const prices: number[] = [];
             const highs: number[] = [];
@@ -296,7 +307,7 @@ export class BinanceAPI {
      * Get scalping market data with real prices (5-minute candles)
      * Optimized for short-term scalping signals
      */
-    static async getScalpingMarketData(pair: string): Promise<{
+    static async getScalpingMarketData(pair: string, cache?: TickKlineCache): Promise<{
         currentPrice: number;
         prices: number[];
         volumes: number[];
@@ -308,7 +319,7 @@ export class BinanceAPI {
             const symbol = this.pairToBinanceSymbol(pair);
 
             // Get 5-minute klines (48 candles = 4 hours of data for scalping)
-            const klines = await this.getKlines(symbol, '5m', 48);
+            const klines = await this.getKlines(symbol, '5m', 48, cache);
 
             const prices: number[] = [];
             const volumes: number[] = [];
@@ -352,9 +363,9 @@ export class BinanceAPI {
      * warmup on the 4H timeframe. The last entry is the in-progress 4H
      * candle (its close tracks the latest price).
      */
-    static async get4hCloses(pair: string, limit: number = 250): Promise<number[]> {
+    static async get4hCloses(pair: string, limit: number = 250, cache?: TickKlineCache): Promise<number[]> {
         const symbol = this.pairToBinanceSymbol(pair);
-        const klines = await this.getKlines(symbol, '4h', limit);
+        const klines = await this.getKlines(symbol, '4h', limit, cache);
         return klines.map(kline => parseFloat(String(kline[4])));
     }
 
@@ -364,9 +375,9 @@ export class BinanceAPI {
      * when there is not enough data. Returns undefined when live data is
      * unavailable (the filter then does not block).
      */
-    static async getBtcRegime(): Promise<'UP' | 'DOWN' | 'NEUTRAL' | undefined> {
+    static async getBtcRegime(cache?: TickKlineCache): Promise<'UP' | 'DOWN' | 'NEUTRAL' | undefined> {
         try {
-            const closes = await this.get4hCloses('BTC/USDT', 250);
+            const closes = await this.get4hCloses('BTC/USDT', 250, cache);
             if (closes.length < 200) return 'NEUTRAL';
             const ema200 = TechnicalIndicators.calculateEMA(closes, 200);
             const price = closes[closes.length - 1];
@@ -374,6 +385,37 @@ export class BinanceAPI {
         } catch (error) {
             console.warn('BTC regime unavailable (filter neutral):', error);
             return undefined;
+        }
+    }
+
+    /**
+     * Latest futures funding rates for ALL symbols in ONE call (symbol ->
+     * lastFundingRate). The per-pair getFundingRate below fires one
+     * premiumIndex request per pair — 24 per Standard-engine tick — and
+     * every one of them 451-fails from Vercel US IPs (and from this VM),
+     * so the funding filter is inert in production and the tick pays 24
+     * futile requests for it. One bulk call fails once instead, and
+     * returns the SAME values per symbol whenever the endpoint IS
+     * reachable, so the filter's behaviour is unchanged in every
+     * environment. A failure returns an empty map (filter neutral, as
+     * before).
+     */
+    static async getFundingRates(): Promise<Map<string, number>> {
+        try {
+            const response = await fetch(`${this.FUTURES_BASE_URL}/premiumIndex`);
+            if (!response.ok) {
+                throw new Error(`Binance futures API error: ${response.status}`);
+            }
+            const data: { symbol: string; lastFundingRate: string }[] = await response.json();
+            const map = new Map<string, number>();
+            for (const row of data) {
+                const rate = parseFloat(row.lastFundingRate);
+                if (Number.isFinite(rate)) map.set(row.symbol, rate);
+            }
+            return map;
+        } catch (error) {
+            console.warn('Funding rates unavailable (filter neutral):', error);
+            return new Map();
         }
     }
 

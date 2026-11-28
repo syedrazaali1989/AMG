@@ -31,6 +31,7 @@
 
 import { BinanceAPI } from './binanceAPI';
 import { evaluateGoldSignalCore, GoldSignalCoreResult } from './goldEngineCore';
+import type { TickKlineCache } from './klineCache';
 import {
     MarketData,
     MarketType,
@@ -87,9 +88,9 @@ export interface GoldSignalResult {
  * Evaluate the gold engine once on live PAXG data.
  * Throws only when live 1H data is unavailable or stale.
  */
-export async function generateGoldSignals(): Promise<GoldSignalResult> {
+export async function generateGoldSignals(cache?: TickKlineCache): Promise<GoldSignalResult> {
     // Mandatory: the 1H series the engine scores. Throws on failure.
-    const candles1h = await BinanceAPI.getCandles(GOLD_DATA_PAIR, '1h', 100);
+    const candles1h = await BinanceAPI.getCandles(GOLD_DATA_PAIR, '1h', 100, cache);
     if (!BinanceAPI.isCandleSeriesFresh(candles1h, HOURLY_INTERVAL_MS)) {
         throw new Error('Live market data unavailable');
     }
@@ -103,14 +104,14 @@ export async function generateGoldSignals(): Promise<GoldSignalResult> {
     // block - context failure never invents data.
     let closes4h: number[] | undefined;
     try {
-        closes4h = await BinanceAPI.get4hCloses(GOLD_DATA_PAIR, 250);
+        closes4h = await BinanceAPI.get4hCloses(GOLD_DATA_PAIR, 250, cache);
     } catch {
         console.warn('Gold 4H closes unavailable (MTF filter neutral)');
     }
 
     let dailyCloses: number[] | undefined;
     try {
-        const daily = await BinanceAPI.getCandles(GOLD_DATA_PAIR, '1d', 250);
+        const daily = await BinanceAPI.getCandles(GOLD_DATA_PAIR, '1d', 250, cache);
         dailyCloses = daily.map(c => c.close);
     } catch {
         console.warn('Gold daily closes unavailable (daily-regime filter neutral)');

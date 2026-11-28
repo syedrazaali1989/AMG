@@ -7,6 +7,7 @@ import { ExchangeAvailability } from './exchangeAvailability';
 import { MarketDataManager } from './marketData';
 import { calculateCoreLevels, calculateATR } from './engineCore';
 import { TechnicalIndicators } from './indicators';
+import type { TickKlineCache } from './klineCache';
 
 /**
  * MATIC was delisted (renamed to POL) in Sep 2024; the correlation
@@ -26,7 +27,8 @@ export class CorrelatedSignalGenerator {
      */
     static async generateCorrelatedSignals(
         btcSignal: Signal,
-        includeAllCoins: boolean = true
+        includeAllCoins: boolean = true,
+        cache?: TickKlineCache
     ): Promise<Signal[]> {
         try {
             // Deterministic selection: the 10 strongest BTC-correlated
@@ -40,7 +42,7 @@ export class CorrelatedSignalGenerator {
             const signals: Signal[] = [];
 
             for (const coinData of correlatedCoins) {
-                const signal = await this.generateSignalForCoin(btcSignal, coinData);
+                const signal = await this.generateSignalForCoin(btcSignal, coinData, cache);
                 if (signal) {
                     signals.push(signal);
                 }
@@ -59,7 +61,8 @@ export class CorrelatedSignalGenerator {
      */
     private static async generateSignalForCoin(
         btcSignal: Signal,
-        coinData: CorrelationData
+        coinData: CorrelationData,
+        cache?: TickKlineCache
     ): Promise<Signal | null> {
         try {
             // The traded pair for this slot (MATIC/USDT -> POL/USDT:
@@ -70,7 +73,8 @@ export class CorrelatedSignalGenerator {
             const marketData = await MarketDataManager.generateMarketData(
                 marketPair,
                 MarketType.CRYPTO,
-                100
+                100,
+                cache
             );
             const currentPrice = marketData.prices[marketData.prices.length - 1];
 
