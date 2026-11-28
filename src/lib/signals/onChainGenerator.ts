@@ -5,6 +5,10 @@ import { evaluateSignalCore, DEFAULT_RULES } from './engineCore';
 import { ExchangeAvailability } from './exchangeAvailability';
 import { MarketDataManager } from './marketData';
 import { CorrelatedSignalGenerator } from './correlatedSignalGenerator';
+import { lastClosedBarOpen } from './standardSignals';
+import type { TickKlineCache } from './klineCache';
+
+const ONE_HOUR_MS = 60 * 60 * 1000;
 
 /** Minimum transaction value (USD) counted as a "large" BTC transfer. */
 export const ONCHAIN_MIN_TX_USD = 500000;
@@ -50,6 +54,15 @@ export interface OnChainReport {
     signals: Signal[];
     transactions: LargeTransaction[];
     diagnostics: OnChainDiagnostics;
+    /**
+     * Decision-bar anchor for this pass: the open time of the last fully
+     * closed 1H BTC candle the core evaluated. All legs of the report
+     * (BTC + correlated alts) share this one bar — the BTC core decides
+     * the direction and the alts derive from it. Null when no BTC signal
+     * was generated. Plumbing for the push watcher only; the route's
+     * public payload is unchanged.
+     */
+    barAnchorMs: number | null;
 }
 
 /**
@@ -70,7 +83,7 @@ export class OnChainSignalGenerator {
      *
      * Throws when a live data source is unavailable.
      */
-    static async generateOnChainReport(): Promise<OnChainReport> {
+    static async generateOnChainReport(cache?: TickKlineCache): Promise<OnChainReport> {
         // Get REAL Bitcoin transactions from Blockchain.info (min $500K).
         // Throws if the source is down - the caller surfaces that honestly.
         const transactions = await BlockchainInfoAPI.getLargeTransactions(ONCHAIN_MIN_TX_USD);
@@ -102,16 +115,16 @@ export class OnChainSignalGenerator {
 
         if (transactions.length === 0) {
             console.log('🔗 No large Bitcoin transactions in the live feed right now');
-            return { signals: [], transactions, diagnostics };
+            return { signals: [], transactions, diagnostics, barAnchorMs: null };
         }
 
         console.log(`🔗 Processing ${transactions.length} real Bitcoin transactions...`);
 
         // Generate PRIMARY signal for Bitcoin (whale-backed)
-        const btcSignal = await this.generateSignalForBitcoin(transactions, diagnostics);
+        const { signal: btcSignal, barAnchorMs } = await this.generateSignalForBitcoin(transactions, diagnostics, cache);
 
         if (!btcSignal) {
-            return { signals: [], transactions, diagnostics };
+            return { signals: [], transactions, diagnostics, barAnchorMs: null };
         }
 
         diagnostics.btcSignalIssued = true;
@@ -119,14 +132,14 @@ export class OnChainSignalGenerator {
         // Generate CORRELATED signals for altcoins (derived from the BTC
         // signal via historical correlation - labelled as correlated)
         console.log(`🔄 Generating correlated altcoin signals...`);
-        const correlatedSignals = await CorrelatedSignalGenerator.generateCorrelatedSignals(btcSignal, true);
+        const correlatedSignals = await CorrelatedSignalGenerator.generateCorrelatedSignals(btcSignal, true, cache);
         diagnostics.correlatedIssued = correlatedSignals.length;
 
         // Combine: BTC + Altcoins
         const allSignals = [btcSignal, ...correlatedSignals];
         console.log(`✅ Total: ${allSignals.length} signals (1 BTC + ${correlatedSignals.length} correlated)`);
 
-        return { signals: allSignals, transactions, diagnostics };
+        return { signals: allSignals, transactions, diagnostics, barAnchorMs };
     }
 
     /**
@@ -157,8 +170,9 @@ export class OnChainSignalGenerator {
      */
     private static async generateSignalForBitcoin(
         transactions: LargeTransaction[],
-        diagnostics: OnChainDiagnostics
-    ): Promise<Signal | null> {
+        diagnostics: OnChainDiagnostics,
+        cache?: TickKlineCache
+    ): Promise<{ signal: Signal | null; barAnchorMs: number | null }> {
         const pair = 'BTC/USDT';
 
         // Market data + core context, exactly as the standard route
@@ -167,14 +181,19 @@ export class OnChainSignalGenerator {
         // fundingRate is intentionally left undefined — the backtest
         // had no historical funding data, and the core treats undefined
         // funding as neutral (never blocks).
-        const marketData = await MarketDataManager.generateMarketData(pair, MarketType.CRYPTO, 100);
+        const marketData = await MarketDataManager.generateMarketData(pair, MarketType.CRYPTO, 100, cache);
         const currentPrice = marketData.prices[marketData.prices.length - 1];
 
-        const btcRegime = await BinanceAPI.getBtcRegime();
+        // Decision-bar anchor for this pass (same definition as the
+        // standard engine's barAnchors: last fully closed 1H bar).
+        // Plumbing for the push watcher only.
+        const barAnchorMs = lastClosedBarOpen(marketData.timestamps, ONE_HOUR_MS);
+
+        const btcRegime = await BinanceAPI.getBtcRegime(cache);
         diagnostics.btcRegime = btcRegime ?? null;
         marketData.btcTrend = btcRegime;
         try {
-            marketData.closes4h = await BinanceAPI.get4hCloses(pair, 250);
+            marketData.closes4h = await BinanceAPI.get4hCloses(pair, 250, cache);
         } catch {
             console.warn('4H closes unavailable for BTC/USDT (MTF filter neutral)');
         }
@@ -183,7 +202,7 @@ export class OnChainSignalGenerator {
         const core = evaluateSignalCore(marketData, SignalType.FUTURE, DEFAULT_RULES);
         if (!core) {
             console.log(`🔗 No on-chain BTC signal: standard core issued nothing for this bar`);
-            return null;
+            return { signal: null, barAnchorMs };
         }
 
         diagnostics.buyScore = core.buyScore;
@@ -202,12 +221,12 @@ export class OnChainSignalGenerator {
         if (isLong && flow.net < 0) {
             diagnostics.whaleVetoBlockedLong++;
             console.log(`🚫 On-chain BTC LONG blocked by whale veto (net flow $${(flow.net / 1000000).toFixed(1)}M, bearish)`);
-            return null;
+            return { signal: null, barAnchorMs };
         }
         if (!isLong && flow.net > 0) {
             diagnostics.whaleVetoBlockedShort++;
             console.log(`🚫 On-chain BTC SHORT blocked by whale veto (net flow $${(flow.net / 1000000).toFixed(1)}M, bullish)`);
-            return null;
+            return { signal: null, barAnchorMs };
         }
 
         // Levels come from the core (verbatim) — same as the standard
@@ -258,7 +277,7 @@ export class OnChainSignalGenerator {
         };
 
         console.log(`✅ Generated BTC ${direction} signal (standard core, confidence: ${core.confidence}%, whale flow ${flow.sentiment})`);
-        return signal;
+        return { signal, barAnchorMs };
     }
 
     /**

@@ -1,6 +1,10 @@
 import { Signal, SignalType, SignalDirection, MarketType, SignalStatus, Timeframe } from './types';
 import { ScalpingMarketData } from './scalpingMarketData';
 import { ExchangeAvailability } from './exchangeAvailability';
+import { lastClosedBarOpen } from './standardSignals';
+import type { TickKlineCache } from './klineCache';
+
+const FIVE_MINUTES_MS = 5 * 60 * 1000;
 
 /**
  * Scalping Signal Generator
@@ -15,20 +19,31 @@ export class ScalpingSignalGenerator {
      * the call throws so the route can answer an honest 502 - signals
      * are never generated from simulated prices. In non-strict mode
      * (legacy client path) the data layer keeps its old fallback.
+     *
+     * Returns the signals AND the per-pair decision-bar anchor: the open
+     * time of the last fully closed 5m candle the scan evaluated. The
+     * anchor is plumbing for the push watcher only — scoring, levels,
+     * thresholds and expiry are untouched. A persistent setup re-fires
+     * on every new 5m bar, so the watcher maps this per-evaluation
+     * anchor to the FIRST-SEEN bar (Redis) before notifying; the anchor
+     * here is never itself a notification id.
      */
     static async generateScalpingSignals(
         pairs: Array<{ pair: string; marketType: MarketType }>,
         signalType: SignalType,
-        opts?: { strict?: boolean }
-    ): Promise<Signal[]> {
+        opts?: { strict?: boolean },
+        cache?: TickKlineCache
+    ): Promise<{ signals: Signal[]; barAnchors: Map<string, number> }> {
         const signals: Signal[] = [];
+        const barAnchors = new Map<string, number>();
         let failedPairs = 0;
 
         for (const { pair, marketType } of pairs) {
             try {
-                const signal = await this.generateSingleScalpingSignal(pair, marketType, signalType, opts?.strict ?? false);
+                const { signal, anchorMs } = await this.generateSingleScalpingSignal(pair, marketType, signalType, opts?.strict ?? false, cache);
                 if (signal) {
                     signals.push(signal);
+                    if (anchorMs !== null) barAnchors.set(pair, anchorMs);
                 }
             } catch (error) {
                 // Strict mode: count the failure and keep scanning the
@@ -45,34 +60,48 @@ export class ScalpingSignalGenerator {
             throw new Error('Live market data unavailable for all scalping pairs');
         }
 
-        return signals.sort((a, b) => b.confidence - a.confidence);
+        signals.sort((a, b) => b.confidence - a.confidence);
+        return { signals, barAnchors };
     }
 
     /**
-     * Generate single scalping signal
+     * Generate single scalping signal. Returns the signal (null when the
+     * pair does not qualify) plus the decision-bar anchor for the
+     * evaluation: the open time of the last fully closed 5m candle.
+     * The anchor is plumbing for the push watcher only.
      */
     private static async generateSingleScalpingSignal(
         pair: string,
         marketType: MarketType,
         signalType: SignalType,
-        strict = false
-    ): Promise<Signal | null> {
+        strict = false,
+        cache?: TickKlineCache
+    ): Promise<{ signal: Signal | null; anchorMs: number | null }> {
         // Get 5-minute candle data (now fetches real Binance prices)
-        const data = await ScalpingMarketData.generateScalpingData(pair, marketType, 48, strict);
+        const data = await ScalpingMarketData.generateScalpingData(pair, marketType, 48, strict, cache);
         const { prices, volumes } = data;
         const currentPrice = prices[prices.length - 1];
+
+        // Decision-bar anchor: the last fully closed 5m candle. Only
+        // the live Binance path carries candle timestamps; the legacy
+        // simulated/Exness paths do not, so they fall back to the
+        // wall-clock 5m grid (same fallback the standard engine uses).
+        const timestamps = (data as { timestamps?: Date[] }).timestamps;
+        const anchorMs = timestamps && timestamps.length > 0
+            ? lastClosedBarOpen(timestamps, FIVE_MINUTES_MS)
+            : Math.floor(Date.now() / FIVE_MINUTES_MS) * FIVE_MINUTES_MS;
 
         // COMPREHENSIVE PRICE VALIDATION
         // Filter out invalid prices that would show as 0.0000 or cause errors
         if (!currentPrice || isNaN(currentPrice) || !isFinite(currentPrice) || currentPrice <= 0) {
             console.log(`⚠️ Skipping ${pair} - invalid price (${currentPrice})`);
-            return null;
+            return { signal: null, anchorMs };
         }
 
         // Reject extremely low-priced coins (< $0.0001)
         if (currentPrice < 0.0001) {
             console.log(`⚠️ Skipping ${pair} - price too low (${currentPrice})`);
-            return null;
+            return { signal: null, anchorMs };
         }
 
         // Calculate fast indicators for scalping
@@ -113,7 +142,7 @@ export class ScalpingSignalGenerator {
         } else if (volumeRatio >= 1.0) {
             volumeBoost = 10;
         } else if (volumeRatio < 0.8) {
-            return null; // Skip very low volume signals
+            return { signal: null, anchorMs }; // Skip very low volume signals
         }
 
         // Apply volume boost to winning direction only (not both!)
@@ -147,7 +176,7 @@ export class ScalpingSignalGenerator {
             direction = SignalDirection.SHORT;
             confidence = Math.round(Math.min((sellScore / 70) * 100, 95));
         } else {
-            return null; // Not strong enough
+            return { signal: null, anchorMs }; // Not strong enough
         }
 
         // Calculate scalping TP/SL (tight levels)
@@ -190,7 +219,7 @@ export class ScalpingSignalGenerator {
             availableExchanges // Add exchange availability
         };
 
-        return signal;
+        return { signal, anchorMs };
     }
 
     /**

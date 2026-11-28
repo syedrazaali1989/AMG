@@ -2,6 +2,7 @@ import { MarketDataManager } from './marketData';
 import { BinanceAPI } from './binanceAPI';
 import { SignalGenerator } from './generator';
 import { MarketType, Signal, SignalType } from './types';
+import type { TickKlineCache } from './klineCache';
 
 /**
  * Server-side generation for the standard crypto engine - the code path
@@ -24,6 +25,31 @@ export const STANDARD_DEFAULT_PAIRS = [
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
 
+/**
+ * Open time (ms) of the last fully closed bar of `barMs` in a candle
+ * series. Shared by the push watcher anchors: the standard engine uses
+ * it for 1H bars, the scalping engine for 5m bars, the on-chain engine
+ * for its 1H decision bar. A bar counts as closed once its full span
+ * has elapsed (open + barMs <= now); the latest timestamp is floored
+ * only as a fallback when no bar in the series is fully closed yet.
+ */
+export function lastClosedBarOpen(timestamps: Date[], barMs: number): number {
+    const now = Date.now();
+    let anchor = 0;
+    for (const t of timestamps) {
+        const ms = t.getTime();
+        if (ms + barMs <= now && ms > anchor) anchor = ms;
+    }
+    if (anchor > 0) return anchor;
+    // Fallback: floor the latest timestamp to the bar grid.
+    const last = timestamps.length > 0 ? timestamps[timestamps.length - 1].getTime() : now;
+    return Math.floor(last / barMs) * barMs;
+}
+
+function lastClosedHourlyBarOpen(timestamps: Date[]): number {
+    return lastClosedBarOpen(timestamps, ONE_HOUR_MS);
+}
+
 export interface StandardSignalsResult {
     signals: Signal[];
     /**
@@ -38,26 +64,14 @@ export interface StandardSignalsResult {
     generatedAt: string;
 }
 
-function lastClosedHourlyBarOpen(timestamps: Date[]): number {
-    const now = Date.now();
-    let anchor = 0;
-    for (const t of timestamps) {
-        const ms = t.getTime();
-        if (ms + ONE_HOUR_MS <= now && ms > anchor) anchor = ms;
-    }
-    if (anchor > 0) return anchor;
-    // Fallback: floor the latest timestamp to the hour.
-    const last = timestamps.length > 0 ? timestamps[timestamps.length - 1].getTime() : now;
-    return Math.floor(last / ONE_HOUR_MS) * ONE_HOUR_MS;
-}
-
 export async function generateStandardSignals(
     pairs: string[] = STANDARD_DEFAULT_PAIRS,
-    signalType: SignalType = SignalType.FUTURE
+    signalType: SignalType = SignalType.FUTURE,
+    cache?: TickKlineCache
 ): Promise<StandardSignalsResult> {
     // Fetch live market data per pair; pairs that fail are skipped.
     const results = await Promise.allSettled(
-        pairs.map(pair => MarketDataManager.generateMarketData(pair, MarketType.CRYPTO, 100))
+        pairs.map(pair => MarketDataManager.generateMarketData(pair, MarketType.CRYPTO, 100, cache))
     );
 
     const marketDataList = results
@@ -76,21 +90,28 @@ export async function generateStandardSignals(
     // Enrich each pair with the signal-quality filter context:
     //  - closes4h:   the pair's 4H closes (multi-timeframe filter)
     //  - btcTrend:   market-wide BTC regime vs its 4H EMA200 (fetched once)
-    //  - fundingRate: latest futures funding (FUTURE signals only)
+    //  - fundingRate: latest futures funding (FUTURE signals only) — ONE
+    //    bulk premiumIndex call for the whole tick, not one call per pair:
+    //    the per-pair calls 451-fail one by one from Vercel IPs, and the
+    //    bulk call returns the same per-symbol values whenever the
+    //    endpoint is reachable (see BinanceAPI.getFundingRates).
     // Any piece that fails to load stays undefined and its filter
     // simply does not block - context failure never invents data and
     // never blocks signal generation.
-    const btcTrend = await BinanceAPI.getBtcRegime();
+    const btcTrend = await BinanceAPI.getBtcRegime(cache);
+    const fundingPromise = signalType === SignalType.FUTURE
+        ? BinanceAPI.getFundingRates()
+        : Promise.resolve(new Map<string, number>());
     await Promise.allSettled(
         marketDataList.map(async (md) => {
             md.btcTrend = btcTrend;
             try {
-                md.closes4h = await BinanceAPI.get4hCloses(md.pair, 250);
+                md.closes4h = await BinanceAPI.get4hCloses(md.pair, 250, cache);
             } catch {
                 console.warn(`4H closes unavailable for ${md.pair} (MTF filter neutral)`);
             }
             if (signalType === SignalType.FUTURE) {
-                md.fundingRate = await BinanceAPI.getFundingRate(md.pair);
+                md.fundingRate = (await fundingPromise).get(BinanceAPI.pairToBinanceSymbol(md.pair));
             }
         })
     );

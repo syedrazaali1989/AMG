@@ -2,7 +2,12 @@ import * as webpush from 'web-push';
 import { generateStandardSignals } from '@/lib/signals/standardSignals';
 import { generateScalpingV2Signals, SCALPING_V2_PAIRS } from '@/lib/signals/scalpingV2';
 import { generateGoldSignals } from '@/lib/signals/goldSignals';
+import { ScalpingSignalGenerator } from '@/lib/signals/scalpingGenerator';
+import { OnChainSignalGenerator } from '@/lib/signals/onChainGenerator';
+import { MarketDataManager } from '@/lib/signals/marketData';
+import { TickKlineCache } from '@/lib/signals/klineCache';
 import type { Signal } from '@/lib/signals/types';
+import { SignalType, MarketType } from '@/lib/signals/types';
 import {
     getPushRedis,
     getVapidPublicKey,
@@ -18,7 +23,7 @@ import type { ResolveSummary } from '@/lib/history/resolve';
 /**
  * New-signal watcher for Web Push notifications.
  *
- * checkAndNotify() evaluates all three engines through the SAME server
+ * checkAndNotify() evaluates all five engines through the SAME server
  * code paths the API routes use (imports, never HTTP self-calls), diffs
  * the result against the push:notified set in Redis, and sends a push
  * for every genuinely new signal to every stored subscription.
@@ -31,6 +36,17 @@ import type { ResolveSummary } from '@/lib/history/resolve';
  *                engine's own deterministic signal id
  *   gold:        engine + pair + side + signal-bar time embedded in
  *                the engine's own deterministic signal id
+ *   scalping:    engine + pair + side + FIRST-SEEN 5m bar. The
+ *                generator re-fires a persistent setup on every new 5m
+ *                bar, so the per-evaluation anchor alone would notify
+ *                up to 48 times per 4h window; the watcher records the
+ *                bar a setup FIRST appeared on (push:firstseen, TTL =
+ *                the signal's 4h expiry) and the id uses that bar.
+ *   onchain:     engine + pair + side + FIRST-SEEN 1H bar (same
+ *                mechanism, TTL = the 48h expiry). The BTC leg is the
+ *                standard core verbatim, so it is dropped when the
+ *                Standard engine already covers the same pair + side +
+ *                bar in the same pass — it never double-notifies.
  *
  * Notified ids are kept for 72h, then pruned. Ids are recorded even
  * when there are zero subscriptions, so a visitor who enables
@@ -41,19 +57,27 @@ const NOTIFIED_KEY = 'push:notified';
 const LAST_CHECK_KEY = 'push:lastcheck';
 const NOTIFIED_TTL_MS = 72 * 60 * 60 * 1000; // 72h
 const OPPORTUNISTIC_INTERVAL_MS = 3 * 60 * 1000; // 3 minutes
+/** First-seen anchors: push:firstseen:<engine>:<pair>:<direction> -> bar ISO. */
+const FIRSTSEEN_PREFIX = 'push:firstseen:';
+/** First-seen TTLs match the signal expiry of each engine. */
+const SCALPING_FIRSTSEEN_TTL_SEC = 4 * 60 * 60; // 4h
+const ONCHAIN_FIRSTSEEN_TTL_SEC = 48 * 60 * 60; // 48h
 
 /** Human-readable engine label for notification titles, e.g. "Standard Signal: BTC/USDT SHORT". */
 const ENGINE_LABELS: Record<string, string> = {
     standard: 'Standard',
     'scalping-v2': 'Scalping V2',
-    gold: 'Gold'
+    gold: 'Gold',
+    scalping: 'Scalping',
+    onchain: 'On-Chain'
 };
 
 /**
  * Notification icon/badge. Absolute production URL: a push payload
  * must carry an absolute URL (a relative path does not resolve in a
- * notification). This is the ONLY icon the site uses - the manifest
- * stays icon-free and there is no favicon, per the owner's order.
+ * notification). The same logo is the PWA manifest app icon
+ * (src/app/icons/, restored 2026-11-26 on the owner's order).
+ * There is still no favicon.
  */
 const NOTIFICATION_ICON_URL = 'https://amgtrading.vercel.app/logo.png';
 
@@ -68,6 +92,15 @@ export interface PushCandidate {
     /** Standard-engine signals carry their source signal + bar anchor for history. */
     signal?: Signal;
     anchorMs?: number;
+    /**
+     * Engines whose setups re-fire every bar (scalping 5m, on-chain 1H)
+     * set this to the first-seen TTL in seconds. checkAndNotify()
+     * rewrites such a candidate's id to its FIRST-SEEN bar before the
+     * notified-set diff, so a persistent setup notifies exactly once
+     * per expiry window. Engines without it keep per-bar ids (their
+     * existing behaviour, unchanged).
+     */
+    firstSeenTtlSec?: number;
 }
 
 export interface CheckSummary {
@@ -105,30 +138,107 @@ function anchorFromEngineId(signal: Signal): string {
     return match ? new Date(parseInt(match[1], 10)).toISOString() : signal.id;
 }
 
+/** Scalping universe — identical to GET /api/scalping/signals: the top
+ *  30 pairs of MarketDataManager.getCryptoPairs(), MATIC/USDT mapped to
+ *  POL/USDT (the MATIC spot series is frozen). */
+function scalpingUniverse(): Array<{ pair: string; marketType: MarketType }> {
+    return MarketDataManager.getCryptoPairs()
+        .slice(0, 30)
+        .map(pair => ({ pair: pair === 'MATIC/USDT' ? 'POL/USDT' : pair, marketType: MarketType.CRYPTO }));
+}
+
 /**
- * Evaluate all three engines and return the currently active signals as
+ * Watcher-only Scalping V2 universe rotation (trim for the 5-engine
+ * ship — TIMING CHANGE, read before touching).
+ *
+ * The 53-pair V2 scan is the tick's long pole: 106 kline fetches (5m +
+ * 1m per pair), and it alone measured 16.4s on this VM's slow Binance
+ * path — over Vercel's ~10s Hobby limit by itself. The watcher scans
+ * ONE HALF of the universe per 5-min tick, alternating on the
+ * wall-clock 5-min bucket, so each pair is scanned every 10 minutes
+ * and the full universe is covered over 2 ticks.
+ *
+ * Effect on detection: a new V2 setup is detected 0–10 min after it
+ * appears (average ~5 min) instead of 0–5 min (average ~2.5 min).
+ * V2 signals live 4 hours, so a few minutes' delay is immaterial to
+ * the trade, and no setup that persists across two ticks can be
+ * missed at all — only a setup that appears AND vanishes inside a
+ * single 10-min window is invisible to the watcher. V2 signal ids are
+ * deterministic per bar, so rotation cannot double-notify.
+ *
+ * The /api/scalping-v2/signals route is NOT rotated: visitors always
+ * see the full 53-pair scan. Only the watcher (this file) rotates.
+ */
+function scalpingV2WatchPairs(): string[] {
+    const bucket = Math.floor(Date.now() / (5 * 60 * 1000)) % 2;
+    return SCALPING_V2_PAIRS.filter((_, i) => i % 2 === bucket);
+}
+
+/**
+ * Evaluate all five engines and return the currently active signals as
  * push candidates. Exported for testing/diagnostics. An engine that
  * fails (live data down) contributes nothing - its failure never
  * invents signals and never blocks the other engines.
  *
- * Deliberately NOT covered: old scalping and on-chain (see
- * PUSH-LABEL-ICON-REPORT.md). Both stamp wall-clock + random ids
- * (SCALP_/ONCHAIN_${Date.now()}_${random}) and their generators return
- * no bar anchor, so there is no stable engine:pair:side:anchor id:
- * a wall-clock 5m anchor would re-notify a persistent scalping setup
- * every 5 minutes, and on-chain's BTC leg is the standard core's BTC
- * signal verbatim (it would double-notify the same trade). Both would
- * also add ~30 / ~12 more Binance fetches to a burst that already
- * trips 418 rate limits. Adding them cleanly needs the generators to
- * return their decision-bar anchors first.
+ * Identity notes (see the module doc comment):
+ * - standard / scalping-v2 / gold: per-bar ids, behaviour unchanged.
+ * - scalping / onchain: candidates carry their CURRENT decision-bar
+ *   anchor here; checkAndNotify() rewrites their ids to the FIRST-SEEN
+ *   bar before the notified-set diff (see resolveFirstSeenAnchors).
+ * - on-chain BTC dedup: the on-chain BTC leg is the standard core
+ *   verbatim, so when the Standard engine already covers the same
+ *   pair + side + decision bar in this pass, the on-chain BTC
+ *   candidate is dropped. Correlated alt legs are distinct trades
+ *   (own entries/levels) and are kept.
  */
 export async function collectCurrentCandidates(): Promise<PushCandidate[]> {
     const candidates: PushCandidate[] = [];
 
-    const [standard, v2, gold] = await Promise.allSettled([
-        generateStandardSignals(),
-        generateScalpingV2Signals(SCALPING_V2_PAIRS),
-        generateGoldSignals()
+    // ONE shared kline cache for the whole tick (see klineCache.ts):
+    // the five engines fetch heavily overlapping candle series (BTC 1H
+    // and 4H in Standard and On-Chain, the correlated alts' 1H series
+    // in both, the 5m series in Scalping V2 and old Scalping). Without
+    // it the tick fires ~200 Binance requests; with it each unique
+    // (symbol, interval) series is fetched once. The cache is created
+    // fresh per tick and passed explicitly — no module-level state, so
+    // no cross-tick staleness. Route callers pass no cache.
+    const klines = new TickKlineCache();
+
+    const [standard, v2, gold, scalping, onchain] = await Promise.allSettled([
+        generateStandardSignals(undefined, SignalType.FUTURE, klines),
+        // Watcher-only V2 rotation (see scalpingV2WatchPairs below):
+        // half the 53-pair universe per 5-min tick, full coverage over
+        // 2 ticks. The /api/scalping-v2/signals route is NOT rotated.
+        generateScalpingV2Signals(scalpingV2WatchPairs(), klines),
+        generateGoldSignals(klines),
+        (async () => {
+            // One generator call per pair, run in parallel — same shape
+            // as GET /api/scalping/signals (the generator itself scans
+            // sequentially; 30 sequential Binance calls would risk the
+            // serverless timeout).
+            const settled = await Promise.allSettled(
+                scalpingUniverse().map(({ pair, marketType }) =>
+                    ScalpingSignalGenerator.generateScalpingSignals(
+                        [{ pair, marketType }],
+                        SignalType.FUTURE,
+                        { strict: true },
+                        klines
+                    )
+                )
+            );
+            const signals: Signal[] = [];
+            const barAnchors = new Map<string, number>();
+            for (const result of settled) {
+                if (result.status === 'fulfilled') {
+                    signals.push(...result.value.signals);
+                    for (const [pair, anchor] of result.value.barAnchors) {
+                        barAnchors.set(pair, anchor);
+                    }
+                }
+            }
+            return { signals, barAnchors };
+        })(),
+        OnChainSignalGenerator.generateOnChainReport(klines)
     ]);
 
     if (standard.status === 'fulfilled') {
@@ -148,8 +258,83 @@ export async function collectCurrentCandidates(): Promise<PushCandidate[]> {
             candidates.push(toCandidate('gold', '/gold', signal, anchorFromEngineId(signal)));
         }
     }
+    if (scalping.status === 'fulfilled') {
+        for (const signal of scalping.value.signals) {
+            const anchorMs = scalping.value.barAnchors.get(signal.pair);
+            if (anchorMs === undefined) continue; // cannot anchor -> never notify, never spam
+            const issued = new Date(anchorMs).toISOString();
+            const candidate = toCandidate('scalping', '/scalping', signal, issued, anchorMs);
+            candidate.firstSeenTtlSec = SCALPING_FIRSTSEEN_TTL_SEC;
+            candidates.push(candidate);
+        }
+    }
+    if (onchain.status === 'fulfilled') {
+        const report = onchain.value;
+        if (report.barAnchorMs !== null) {
+            const issued = new Date(report.barAnchorMs).toISOString();
+            // Standard coverage for the BTC dedup: pair + side + bar.
+            const standardKeys = new Set(
+                candidates
+                    .filter(c => c.id.startsWith('standard:'))
+                    .map(c => c.id.slice('standard:'.length))
+            );
+            for (const signal of report.signals) {
+                if (
+                    signal.pair === 'BTC/USDT' &&
+                    standardKeys.has(`${signal.pair}:${signal.direction}:${issued}`)
+                ) {
+                    // Same BTC trade the Standard engine already covers
+                    // this bar — suppress the duplicate notification.
+                    continue;
+                }
+                const candidate = toCandidate('onchain', '/on-chain', signal, issued, report.barAnchorMs);
+                candidate.firstSeenTtlSec = ONCHAIN_FIRSTSEEN_TTL_SEC;
+                candidates.push(candidate);
+            }
+        }
+    }
 
     return candidates;
+}
+
+/**
+ * First-seen anchor resolution for engines whose setups re-fire every
+ * bar (scalping 5m, on-chain 1H). A candidate's id is built from its
+ * CURRENT decision bar by collectCurrentCandidates(); this rewrites it
+ * to the bar the setup FIRST appeared on, stored in Redis under
+ * push:firstseen:<engine>:<pair>:<direction> with a TTL equal to the
+ * signal's expiry. Consequences:
+ *  - a persistent setup keeps one id across evaluations -> notifies
+ *    exactly once (the push:notified set dedups it);
+ *  - a setup that vanishes and reappears within the TTL keeps its old
+ *    anchor -> no re-notify (a transient data gap cannot spam);
+ *  - a setup that reappears after the TTL (its old signal expired)
+ *    gets a fresh anchor -> notifies again as a new issuance.
+ * A Redis failure here falls back to the current-bar id (one extra
+ * notification at most) — it never breaks the tick.
+ */
+async function resolveFirstSeenAnchors(
+    redis: import('@upstash/redis').Redis,
+    candidates: PushCandidate[]
+): Promise<void> {
+    for (const candidate of candidates) {
+        if (candidate.firstSeenTtlSec === undefined) continue;
+        if (!candidate.signal || candidate.anchorMs === undefined) continue;
+        const engine = candidate.id.split(':')[0];
+        const key = `${FIRSTSEEN_PREFIX}${engine}:${candidate.signal.pair}:${candidate.signal.direction}`;
+        const currentIso = new Date(candidate.anchorMs).toISOString();
+        try {
+            const stored = await redis.get<string>(key);
+            if (typeof stored === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(stored)) {
+                candidate.id = `${engine}:${candidate.signal.pair}:${candidate.signal.direction}:${stored}`;
+                candidate.anchorMs = Date.parse(stored);
+            } else {
+                await redis.set(key, currentIso, { ex: candidate.firstSeenTtlSec });
+            }
+        } catch {
+            // Keep the current-bar id; the notified-set diff still applies.
+        }
+    }
 }
 
 export async function checkAndNotify(): Promise<CheckSummary> {
@@ -177,6 +362,11 @@ export async function checkAndNotify(): Promise<CheckSummary> {
 
     const candidates = await collectCurrentCandidates();
     const now = Date.now();
+
+    // Map scalping/on-chain candidates to their first-seen bar, so a
+    // persistent setup notifies once per expiry window (see
+    // resolveFirstSeenAnchors). Standard / v2 / gold ids are untouched.
+    await resolveFirstSeenAnchors(redis, candidates);
 
     let recorded = 0;
     try {

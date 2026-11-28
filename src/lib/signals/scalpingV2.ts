@@ -23,6 +23,7 @@
 
 import { BinanceAPI } from './binanceAPI';
 import { ICTEngine, ICTGrade, ICTSignal } from './ictEngine';
+import type { TickKlineCache } from './klineCache';
 import {
     MarketType,
     Signal,
@@ -101,7 +102,8 @@ function emptyFunnel(pairsRequested: number): ScalpingV2Funnel {
  * Throws only when NO pair could be loaded with fresh data at all.
  */
 export async function generateScalpingV2Signals(
-    pairs: string[] = SCALPING_V2_PAIRS
+    pairs: string[] = SCALPING_V2_PAIRS,
+    cache?: TickKlineCache
 ): Promise<ScalpingV2Result> {
     const funnel = emptyFunnel(pairs.length);
     const scored: { pair: string; score: number; grade: ICTGrade }[] = [];
@@ -123,8 +125,8 @@ export async function generateScalpingV2Signals(
     const perPair = await Promise.allSettled(
         pairs.map(async (pair): Promise<Signal | null> => {
             const [htf, ltf] = await Promise.all([
-                BinanceAPI.getCandles(pair, HTF_INTERVAL, CANDLE_LIMIT),
-                BinanceAPI.getCandles(pair, LTF_INTERVAL, CANDLE_LIMIT)
+                BinanceAPI.getCandles(pair, HTF_INTERVAL, CANDLE_LIMIT, cache),
+                BinanceAPI.getCandles(pair, LTF_INTERVAL, CANDLE_LIMIT, cache)
             ]);
 
             const fresh =
